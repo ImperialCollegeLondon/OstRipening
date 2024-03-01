@@ -1,0 +1,3 @@
+[submodule "pnflowPy"]
+	path = pnflowPy
+	url = https://github.com/ImperialCollegeLondon/pnflowPy.git
