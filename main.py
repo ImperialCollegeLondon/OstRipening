@@ -3,11 +3,13 @@ import sys
 import os
 import pandas as pd
 
-sys.path.append("./Flowmodel")
-from Flowmodel.inputData import InputData
-from Flowmodel.network import Network
-from Flowmodel.sPhase import SinglePhase
+sys.path.append("./pnflowPy")
+from pnflowPy.inputData import InputData
+from pnflowPy.network import Network
+from pnflowPy.sPhase import SinglePhase
+from OstwaldRipening import PDrainage, PImbibition, SecDrainage, SecImbibition
 from plot import makePlot
+
 
 
 # __DATE__ = "Jul 25 , 2023"
@@ -40,44 +42,39 @@ def main():
         imbibePlot = False
         probablePlot = False
         writeData = True
-        includeTrapping = True
-
-        if includeTrapping:
-            from Hysteresis import PDrainage, PImbibition, SecDrainage, SecImbibition
-        else:
-            from OstRipening import PDrainage, PImbibition, SecDrainage, SecImbibition
-
-        primaryD, primaryI = True, True
+        writeTrappedData = True
+        fillTillNWDisconnected = True
 
         # two Phase simulations
         if input_data.satControl():
-            netsim.prop_drainage = {}
-            netsim.prop_imbibition = {}
-            for cycle in range(len(input_data.satControl())):
+            firstDrainCycle = True
+            firstImbCycle = True
+            for j in range(len(input_data.satControl())):
                 netsim.finalSat, Pc, netsim.dSw, netsim.minDeltaPc,\
                  netsim.deltaPcFraction, netsim.calcKr, netsim.calcI,\
                  netsim.InjectFromLeft, netsim.InjectFromRight,\
                  netsim.EscapeFromLeft, netsim.EscapeFromRight =\
-                 input_data.satControl()[cycle]
+                 input_data.satControl()[j]
                 netsim.filling = True
 
                 if netsim.finalSat < netsim.satW:
                     # Drainage process
                     netsim.is_oil_inj = True
                     netsim.maxPc = Pc
-                    if primaryD:
+                    if firstDrainCycle:
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
                             netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
                                 'INIT_CONT_ANG')
-                        netsim = PDrainage(netsim, includeTrapping=includeTrapping,
-                                                  writeData=writeData)
-                        primaryD = False
+                        netsim = PDrainage(netsim, writeData=writeData, 
+                                           writeTrappedData=writeTrappedData)
+                        netsim.prop_drainage = {}
                         netsim.prop_drainage['contactAng'] = netsim.contactAng.copy()
                         netsim.prop_drainage['thetaRecAng'] = netsim.thetaRecAng.copy()
                         netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                        firstDrainCycle = False
                     else:
-                        netsim = SecDrainage(netsim, includeTrapping=includeTrapping,
-                                             writeData=writeData)
+                        netsim = SecDrainage(netsim, writeData=writeData, 
+                                             writeTrappedData=writeTrappedData)
                     netsim.drainage()
                     
                     if drainPlot:
@@ -91,19 +88,20 @@ def main():
                     # Imbibition process
                     netsim.is_oil_inj = False
                     netsim.minPc = Pc
-                    if primaryI:
+                    if firstImbCycle:
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
                             netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
                                 'EQUIL_CON_ANG')
                         netsim = PImbibition(netsim, writeData=writeData,
-                                             includeTrapping=includeTrapping)
-                        primaryI = False
+                                             writeTrappedData=writeTrappedData)
+                        netsim.prop_imbibition = {}
                         netsim.prop_imbibition['contactAng'] = netsim.contactAng.copy()
                         netsim.prop_imbibition['thetaRecAng'] = netsim.thetaRecAng.copy()
                         netsim.prop_imbibition['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                        firstImbCycle = False
                     else:
                         netsim = SecImbibition(netsim, writeData=writeData,
-                                               includeTrapping=includeTrapping)
+                                               writeTrappedData=writeTrappedData)
                     netsim.imbibition()
 
                     if imbibePlot:
