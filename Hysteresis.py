@@ -4,8 +4,8 @@ from sortedcontainers import SortedList
 import warnings
 from itertools import chain
 
-from Flowmodel.tPhaseD import TwoPhaseDrainage
-from Flowmodel.tPhaseImb import TwoPhaseImbibition
+from pnflowPy.tPhaseD import TwoPhaseDrainage
+from pnflowPy.tPhaseImb import TwoPhaseImbibition
 
 import sys
 sys.setrecursionlimit(2000)
@@ -233,7 +233,7 @@ class PDrainage(TwoPhaseDrainage):
             self._num = 1
             while True:         
                 file_name = os.path.join(
-                    result_dir, "Flowmodel_"+self.title+"_Drainage_cycle"+str(
+                    result_dir, "pnflowPy_"+self.title+"_Drainage_cycle"+str(
                         self.cycle)+"_"+self.label+"_"+str(self._num)+".csv")
                 if os.path.isfile(file_name): self._num += 1
                 else:
@@ -241,13 +241,13 @@ class PDrainage(TwoPhaseDrainage):
             self.file_name = file_name
         else:
             self.file_name = os.path.join(
-                result_dir, "Flowmodel_"+self.title+"_Drainage_cycle"+str(self.cycle)+\
+                result_dir, "pnflowPy_"+self.title+"_Drainage_cycle"+str(self.cycle)+\
                     "_"+self.label+"_"+str(self._num)+".csv")
             
     
     def __writeTrappedData__(self):
         filename = os.path.join(
-            "./results_csv/Flowmodel_{}_Drainage_cycle{}_{}_{}_trappedDist.csv".format(
+            "./results_csv/pnflowPy_{}_Drainage_cycle{}_{}_{}_trappedDist.csv".format(
                 self.title, self.cycle, self.label, self._num))
         data = [*zip(self.Rarray, self.volarray, self.fluid, self.trappedW, self.trappedNW)]
         np.savetxt(filename, data, delimiter=',', header='rad, volume, fluid, trappedW, trappedNW')
@@ -483,7 +483,7 @@ class PImbibition(TwoPhaseImbibition):
 
     def __writeTrappedData__(self):
         filename = os.path.join(
-            "./results_csv/Flowmodel_{}_Imbibition_cycle{}_{}_{}_trappedDist.csv".format(
+            "./results_csv/pnflowPy_{}_Imbibition_cycle{}_{}_{}_trappedDist.csv".format(
                 self.title, self.cycle, self.label, self._num))
         data = [*zip(self.Rarray, self.volarray, self.fluid, self.trappedW, self.trappedNW)]
         np.savetxt(filename, data, delimiter=',', header='rad, volume, fluid, trappedW, trappedNW')
@@ -497,7 +497,7 @@ class PImbibition(TwoPhaseImbibition):
             self._num = 1
             while True:         
                 file_name = os.path.join(
-                    result_dir, "Flowmodel_"+self.title+"_Imbibition_cycle"+str(self.cycle)+\
+                    result_dir, "pnflowPy_"+self.title+"_Imbibition_cycle"+str(self.cycle)+\
                         "_"+self.label+"_"+str(self._num)+".csv")
                 if os.path.isfile(file_name): self._num += 1
                 else:
@@ -505,7 +505,7 @@ class PImbibition(TwoPhaseImbibition):
             self.file_name = file_name
         else:
             self.file_name = os.path.join(
-                result_dir, "Flowmodel_"+self.title+"_Imbibition_cycle"+str(self.cycle)+\
+                result_dir, "pnflowPy_"+self.title+"_Imbibition_cycle"+str(self.cycle)+\
                     "_"+self.label+"_"+str(self._num)+".csv") 
 
 
