@@ -3,10 +3,10 @@ import sys
 import os
 import pandas as pd
 
-sys.path.append("./Flowmodel")
-from Flowmodel.inputData import InputData
-from Flowmodel.network import Network
-from Flowmodel.sPhase import SinglePhase
+sys.path.append("./pnflowPy")
+from pnflowPy.inputData import InputData
+from pnflowPy.network import Network
+from pnflowPy.sPhase import SinglePhase
 from plot import makePlot
 
 
