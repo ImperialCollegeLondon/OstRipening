@@ -1,8 +1,6 @@
 import os
 import numpy as np
 from sortedcontainers import SortedList
-import warnings
-from itertools import chain
 from time import time
 
 from pnflowPy.tPhaseD import TwoPhaseDrainage
@@ -20,154 +18,78 @@ class PDrainage(TwoPhaseDrainage):
         if self.writeData: self.__fileName__()
         self.prevFilled = (self.fluid==1)
         self.writeTrappedData = writeTrappedData
-
-
-    def drainage(self):
-        start = time()
-        print('---------------------------------------------------------------------------')
-        print('-------------------------Two Phase Drainage Cycle {}------------------------'.format(self.cycle))
-
-        if self.writeData:
-            self.__fileName__()
-            self.__writeHeadersD__()
-        else: self.resultD_str = ""
-
-        self.SwTarget = max(self.finalSat, self.satW-self.dSw*0.5)
-        self.PcTarget = min(self.maxPc, self.capPresMax+(
-            self.minDeltaPc+abs(
-             self.capPresMax)*self.deltaPcFraction)*0.1)
-        self.oldPcTarget = 0
-        self.resultD_str = self.do.writeResult(self.resultD_str, self.capPresMin)
-
-        while self.filling:
-            self.oldSatW = self.satW
-            self.__PDrainage__()
-            
-            if (self.PcTarget > self.maxPc-0.001) or (
-                 self.satW < self.finalSat+0.00001):
-                self.filling = False
-                break
-            
-            self.oldPcTarget = self.capPresMax
-            self.PcTarget = min(self.maxPc+1e-7, self.PcTarget+(
-                self.minDeltaPc+abs(self.PcTarget)*self.deltaPcFraction))
-            self.SwTarget = max(self.finalSat-1e-15, round((
-                self.satW-self.dSw*0.75)/self.dSw)*self.dSw)
-
-            if len(self.ElemToFill) == 0:
-                self.filling = False
-                self.cnt, self.totNumFill = 0, 0
-
-                while (self.PcTarget < self.maxPc-1e-8) and (self.satW>self.finalSat):
-                    self.__CondTP_Drainage__()
-                    self.satW = self.do.Saturation(self.areaWPhase, self.areaSPhase)
-                    self.do.computePerm(self.capPresMax)
-                    self.resultD_str = self.do.writeResult(self.resultD_str, self.capPresMax)
-
-                    self.PcTarget = min(self.maxPc-1e-7, self.PcTarget+(
-                        self.minDeltaPc+abs(self.PcTarget)*self.deltaPcFraction))
-                    if self.capPresMax == self.PcTarget: break
-                    else: self.capPresMax = self.PcTarget
-                   
-                break
-
-        if self.writeData:
-            with open(self.file_name, 'a') as fQ:
-                fQ.write(self.resultD_str)
-            if self.writeTrappedData:
-                self.__writeTrappedData__()
-
-        self.maxPc = self.capPresMax
-        self.rpd = self.sigma/self.maxPc
-        print("Number of trapped elements: W: {}  NW:{}".format(
-            self.trappedW.sum(), self.trappedNW.sum()))
-        print('No of W clusters: {}, No of NW clusters: {}'.format(
-            np.count_nonzero(self.clusterW.size), 
-            np.count_nonzero(self.clusterNW.size)))
-        self.is_oil_inj = False
-        self.do.__finitCornerApex__(self.capPresMax)
-        print('Time spent for the drainage process: ', time() - start)        
-        print('==========================================================\n\n')
-        #from IPython import embed; embed()
     
-
     def popUpdateOilInj(self):
         k = self.ElemToFill.pop(0)
         capPres = self.PcD[k]
         self.capPresMax = np.max([self.capPresMax, capPres])
+
+        self.fluid[k] = 1
+        self.hasNWFluid[k] = True
+        arr = self.elem[k].neighbours[self.elem[k].neighbours>0]
+        arr0 = arr[(self.fluid[arr]==0) & ~(self.trappedW[arr])]
+        arr1 = arr[self.hasNWFluid[arr]]
+        self.PistonPcRec[k] = self.centreEPOilInj[k]
+
+        ''' check whether the just filled element is a circle '''
         try:
-            self.fluid[k] = 1
-            self.hasNWFluid[k] = True
-            self.connNW[k] = True
-            self.clusterNW_ID[k] = 0
-            self.clusterNW.members[0, k] = True
-            self.PistonPcRec[k] = self.centreEPOilInj[k]
-            arr = self.elem[k].neighbours[self.elem[k].neighbours>0]
-            self.cnt += 1
-            self.invInsideBox += self.isinsideBox[k]
-            arr2 = arr[self.hasWFluid[arr]]
-            self.__update_PcD_ToFill__(arr2)            
+            assert self.isCircle[k]
+            self.hasWFluid[k] = False
+            kk = self.clusterW_ID[k]
+            self.clusterW.members[kk,k] = False
+            self.clusterW_ID[k] = -5
+            try:
+                assert not self.clusterW.members[kk].any()
+                self.clusterW.availableID.update([kk])
+            except AssertionError:
+                assert arr0.size>0
+                self.do.check_Trapping_Clustering(
+                   arr0.copy(), self.hasWFluid.copy(), 0, self.capPresMax, True)
         except AssertionError:
             pass
-        
+
+        ''' update the clustering details of the just filled element '''
+        self.quickClustering(k, arr1, capPres)
+        self.__update_PcD_ToFill__(arr0)
+        self.cnt += 1
+        self.invInsideBox += self.isinsideBox[k]
+
     
-    def __PDrainage__(self):
-        warnings.simplefilter(action='ignore', category=RuntimeWarning)
-        self.totNumFill = 0
-        self.fillTarget = max(self.m_minNumFillings, int(
-            self.m_initStepSize*(self.totElements)*(
-             self.SwTarget-self.satW)))
-        self.invInsideBox = 0
-        
-        while (self.PcTarget+1.0e-32 > self.capPresMax) & (
-                self.satW > self.SwTarget):
-            self.oldSatW = self.satW
-            self.invInsideBox = 0
-            self.cnt = 0
-            try:
-                while (self.invInsideBox < self.fillTarget) & (
-                    len(self.ElemToFill) != 0) & (
-                        self.PcD[self.ElemToFill[0]] <= self.PcTarget):
-                    self.popUpdateOilInj()
-            except IndexError:
-                self.totNumFill += self.cnt
-                break
+    def quickTrapping(self, arr0, capPres):
+        ''' write code here'''
+        pass
 
-            try:
-                assert (self.PcD[self.ElemToFill[0]] > self.PcTarget) & (
-                        self.capPresMax < self.PcTarget)
-                self.capPresMax = self.PcTarget
-            except AssertionError:
-                pass
-            
-            self.__CondTP_Drainage__()
-            self.satW = self.do.Saturation(self.areaWPhase, self.areaSPhase)
-            self.totNumFill += self.cnt
-            try:
-                self.fillTarget = max(self.m_minNumFillings, int(min(
-                    self.fillTarget*self.m_maxFillIncrease,
-                    self.m_extrapCutBack*(self.invInsideBox / (
-                        self.satW-self.oldSatW))*(self.SwTarget-self.satW))))
-            except OverflowError:
-                pass
-                
-            try:
-                assert self.PcD[self.ElemToFill[0]] <= self.PcTarget
-            except AssertionError:
-                break
 
+    def quickClustering(self, k, arr1, capPres):
         try:
-            assert (self.PcD[self.ElemToFill[0]] > self.PcTarget)
-            self.capPresMax = self.PcTarget
-        except (AssertionError, IndexError):
-            self.PcTarget = self.capPresMax
-        
-        self.__CondTP_Drainage__()
-        self.satW = self.do.Saturation(self.areaWPhase, self.areaSPhase)
-        self.do.computePerm(self.capPresMax)
-        self.resultD_str = self.do.writeResult(self.resultD_str, self.capPresMax)
-        
-
+            ids = self.clusterNW_ID[arr1]
+            kk = ids.min()
+            ''' newly filled takes the properties of already filled neighbour '''
+            self.connNW[k] = self.clusterNW[kk].connected
+            self.clusterNW_ID[k] = kk
+            self.clusterNW.members[kk, k] = True
+            arr1 = arr1[ids!=kk]
+            assert arr1.size>0
+            ''' need to coalesce '''
+            ids = ids[ids!=kk]
+            mem = self.elementListS[self.clusterNW.members[ids].any(axis=0)]
+            self.clusterNW_ID[mem] = kk
+            self.clusterNW.members[ids] = False
+            self.clusterNW.members[kk, mem] = True
+            self.connNW[self.clusterNW[kk].members] = (
+                self.clusterNW.connected[kk] or self.clusterNW.connected[ids].any())
+            self.clusterNW.availableID.update(ids)
+        except ValueError:
+            ''' create a new cluster for k'''
+            mem = np.zeros(self.totElements, dtype=bool)
+            mem[k] = True
+            arrDict = {}
+            trappedStatus = ~(self.elem[k].neighbours<=0).any()
+            arrDict[1] = {'members': mem, 'connStatus': False, 'trappedStatus': trappedStatus}
+            self.clusterNW.clustering(
+                arrDict, capPres, self.clusterNW_ID, self.clusterNW, self.trappedNW)
+        except AssertionError:
+            pass
     
     def __fileName__(self):
         result_dir = "./results_csv/"
@@ -207,10 +129,6 @@ class SecDrainage(PDrainage):
         self.is_oil_inj = True
         self.contactAng, self.thetaRecAng, self.thetaAdvAng = self.prop_drainage.values()
         
-        self.trapped = self.trappedW
-        self.trappedData = self.clusterW
-        self.trapClust = self.clusterW_ID
-    
         self.do.__initCornerApex__()
         self.Fd_Tr = self.do.__computeFd__(self.elemTriangle, self.halfAnglesTr)
         self.Fd_Sq = self.do.__computeFd__(self.elemSquare, self.halfAnglesSq)
@@ -236,142 +154,16 @@ class SecDrainage(PDrainage):
         self.writeTrappedData = writeTrappedData
         self.totNumFill = 0
 
-
-    def popUpdateOilInj(self):
-        k = self.ElemToFill.pop(0)
-        capPres = self.PcD[k]
-        self.capPresMax = np.max([self.capPresMax, capPres])
-
-        try:
-            self.fluid[k] = 1
-            self.hasNWFluid[k] = True
-            self.connNW[k] = True
-            self.clusterNW_ID[k] = 0
-            self.clusterNW.members[0, k] = True
-            self.PistonPcRec[k] = self.centreEPOilInj[k]
-            arr = self.elem[k].neighbours[self.elem[k].neighbours>0]
-            arr0 = arr[self.hasWFluid[arr]]
-            arr1 = arr[self.hasNWFluid[arr]&(self.clusterNW_ID[arr]>0)]
-            try:
-                assert arr1.size>0
-                ids = self.clusterNW_ID[arr1]
-                mem = self.elementListS[self.clusterNW.members[ids].any(axis=0)]
-                self.connNW[mem] = True
-                self.clusterNW_ID[mem] = 0
-                self.clusterNW.members[0, mem] = True
-                self.populateToFill(mem)
-            except:
-                self.__update_PcD_ToFill__(arr0)
-
-            self.cnt += 1
-            self.invInsideBox += self.isinsideBox[k]
-        except (AssertionError, IndexError):
-            pass
-
-
-    def untrapNWElements(self, ind):
-        idx = self.trapCluster_NW[ind]
-        arrr = np.zeros(self.totElements, dtype='bool')
-        arrr[ind[idx==0]] = True
-        idx = idx[idx>0]
-        while True:
-            try:
-                i = idx[0]
-                arrr[(self.trapCluster_NW==i)] = True
-                idx = idx[idx!=i]
-            except IndexError:
-                break
-        try:
-            cond = arrr & self.trappedNW
-            assert np.any(cond)
-            self.trapCluster_NW[arrr] = 0
-        except AssertionError:
-            pass
-        
-        self.connNW[arrr] = True
-        self.trappedNW[arrr] = False
-        self.prevFilled[arrr] = False
-        self.populateToFill(self.elementLists[arrr[1:-1]])
-
-    
-    def identifyTrappedElements(self):
-        Notdone = (self.fluid==1)
-        tin = list(self.conTToIn[Notdone[self.conTToIn+self.nPores]])
-        tout = self.conTToOut[Notdone[self.conTToOut+self.nPores]]
-        self.trappedNW[:] = True
-        conn = np.zeros(self.totElements, dtype='bool')
-
-        while True:
-            try:
-                conn[:] = False
-                tt = tin.pop(0)
-                Notdone[tt+self.nPores] = False
-                conn[tt+self.nPores] = True
-                while True:
-                    try:
-                        pp = np.array([self.P1array[tt-1], self.P2array[tt-1]])
-                        pp = pp[Notdone[pp]]
-                        Notdone[pp] = False
-                        conn[pp] = True
-
-                        tt = np.array([*chain(*self.PTConData[pp])])
-                        tt = tt[Notdone[tt+self.nPores]]
-                        Notdone[tt+self.nPores] = False
-                        conn[tt+self.nPores] = True
-                    except IndexError:
-                        try:
-                            tin = np.array(tin)
-                            tin = list(tin[Notdone[tin]])
-                        except IndexError:
-                            tin=[]
-                        break
-                if any(conn[tout]):
-                    self.trappedNW[conn] = False
-                
-            except IndexError:
-                break
-
-
     def initializeToFill(self):
         condlist1 = np.zeros(self.totElements-2, dtype='bool')
         def _f(i):
-            return self.fluid[self.elem[i].neighbours].sum()>0
+            return self.hasNWFluid[self.elem[i].neighbours].any()
         condlist1[(self.fluid[1:-1]==0)] = np.array(
             [*map(lambda i: _f(i), self.elementLists[(self.fluid[1:-1]==0)])])
         ElemToFill = self.elementLists[condlist1]
 
         self.__update_PcD_ToFill__(ElemToFill)
 
-
-    def populateToFill(self, arr):
-        done = np.zeros(self.totElements, dtype='bool')
-        fluid0 = (self.fluid==0)
-        fluid1 = (self.fluid==1)
-        arr = arr[fluid0[arr]]
-        done[arr] = True
-        ElemToFill = done.copy()
-        done[[-1,0]] = True
-        
-        temp = np.zeros(self.totElements, dtype='bool')
-        while True:
-            temp[self.PTConnections[arr[arr<=self.nPores]]] = True
-            temp[self.TPConnections[arr[arr>self.nPores]-self.nPores]] = True
-            temp[done] = False
-            ElemToFill[np.where(temp & fluid0)] = True
-            arr = np.where(temp & fluid1)[0]
-            if not any(arr):
-                break            
-            done[temp] = True
-
-        ElemToFill= np.where(ElemToFill)[0]
-        self.__update_PcD_ToFill__(ElemToFill)
-
-
-    def renumCluster(self):
-        numOld = np.unique(self.trapCluster_NW)
-        for ind, v in enumerate(numOld):
-            self.trapCluster_NW[self.trapCluster_NW==v] = ind
-         
             
 class PImbibition(TwoPhaseImbibition):
     def __new__(cls, obj, writeData=False, writeTrappedData=True):
@@ -379,81 +171,9 @@ class PImbibition(TwoPhaseImbibition):
         return obj
     
     def __init__(self, obj, writeData=False, writeTrappedData=True):
-        super().__init__(obj, writeData=writeData)
+        super().__init__(obj, writeData=writeData, trapping=False)
         self.writeData = writeData
-        self.trapped = self.trappedNW
-        self.trappedData = self.clusterNW
-        self.trapClust = self.clusterNW_ID
         self.writeTrappedData = writeTrappedData
-        print(self.contactAng)
-        print(self.contactAng.sum())
-
-
-    def imbibition(self):
-        start = time()
-        print('----------------------------------------------------------------------------------')
-        print('---------------------------------Two Phase Imbibition Cycle {}---------------------'.format(self.cycle))
-
-        if self.writeData:
-            self.__fileName__()
-            self.__writeHeadersI__()
-        else:
-            self.resultI_str = ""
-            self.totNumFill = 0
-            self.resultI_str = self.do.writeResult(self.resultI_str, self.capPresMax)
-            
-        self.SwTarget = min(self.finalSat, self.satW+self.dSw*0.5)
-        self.PcTarget = max(self.minPc, self.capPresMin-(
-            self.minDeltaPc+abs(self.capPresMin)*self.deltaPcFraction)*0.1)
-        self.fillTarget = max(self.m_minNumFillings, int(
-            self.m_initStepSize*(self.totElements)*(
-                self.satW-self.SwTarget)))
-
-        while self.filling:
-            self.__PImbibition__()
-
-            if (self.PcTarget < self.minPc+0.001) or (
-                 self.satW > self.finalSat-0.00001):
-                self.filling = False
-                break
-
-            if (len(self.ElemToFill)==0):
-                self.filling = False
-                self.cnt, self.totNumFill = 0, 0
-                _pclist = np.array([-1e-7, self.minPc])
-                _pclist = np.sort(_pclist[_pclist<self.capPresMin])[::-1]
-                for Pc in _pclist:
-                    self.capPresMin = Pc
-                    self.__CondTPImbibition__()
-                    self.satW = self.do.Saturation(self.areaWPhase, self.areaSPhase)
-                    self.do.computePerm(self.capPresMin)
-                    self.resultI_str = self.do.writeResult(self.resultI_str, self.capPresMin)
-                    
-                break
-
-            self.PcTarget = max(self.minPc+1e-7, self.PcTarget-(
-                self.minDeltaPc+abs(
-                    self.PcTarget)*self.deltaPcFraction+1e-16))
-            self.SwTarget = min(self.finalSat+1e-15, round((
-                self.satW+self.dSw*0.75)/self.dSw)*self.dSw)
-
-        if self.writeData:
-            with open(self.file_name, 'a') as fQ:
-                fQ.write(self.resultI_str)
-            if self.writeTrappedData:
-                self.__writeTrappedData__()
-
-        
-        print("Number of trapped elements: W: {}  NW:{}".format(
-            self.trappedW.sum(), self.trappedNW.sum()))
-        print('No of W clusters: {}, No of NW clusters: {}'.format(
-            np.count_nonzero(self.clusterW.size),
-            np.count_nonzero(self.clusterNW.size)))
-        self.is_oil_inj = True
-        self.do.__finitCornerApex__(self.capPresMin)
-        print('Time spent for the imbibition process: ', time() - start)
-        print('===========================================================\n\n')
-        #from IPython import embed; embed()
 
 
     def popUpdateWaterInj(self):
@@ -461,39 +181,56 @@ class PImbibition(TwoPhaseImbibition):
         capPres = self.PcI[k]
         self.capPresMin = np.min([self.capPresMin, capPres])
 
-        try:
-            self.fluid[k] = 0
-            self.hasWFluid[k] = True
-            self.hasNWFluid[k] = False
-            kk = self.clusterNW_ID[k]
-            self.clusterNW_ID[k] = -5
-            self.clusterNW.members[kk,k] = False
+        self.fluid[k] = 0
+        self.hasNWFluid[k] = False
+        kk = self.clusterNW_ID[k]
+        self.clusterNW_ID[k] = -5
+        self.clusterNW.members[kk,k] = False
+        self.trappedNW[k] = False
 
-            neigh = self.elem[k].neighbours[self.elem[k].neighbours>0]
+        ''' update the trapping status of the cluster kk'''
+        try:
+            mem = self.clusterNW.members[kk]
+            assert mem.any()
+            trappedStatus = (~mem[self.conTToExit].any())
+            self.trappedNW[self.clusterNW[kk].members] = trappedStatus
+            self.clusterNW.trappedStatus[kk] = trappedStatus
+        except AssertionError:
+            self.clusterNW.availableID.update([kk])
+        
+        neigh = self.elem[k].neighbours[self.elem[k].neighbours>0]
+        try:
+            assert not self.hasWFluid[k]
+            self.hasWFluid[k] = True
             neighW = neigh[self.hasWFluid[neigh]]
             ids = self.clusterW_ID[neighW]
-            try:
-                idmin = ids.min()
-                ids = ids[ids!=idmin]
-                assert ids.size>0
-                mem = self.elementListS[self.clusterW.members[ids].any(axis=0)]
-                self.clusterW.members[idmin][mem] = True
-                self.clusterW.members[ids] = False
-                self.clusterW_ID[mem] = idmin
-            except (AssertionError, ValueError):
-                pass
+            ii = ids.min()
 
-            self.fillmech[k] = 1*(self.PistonPcAdv[k]==capPres)+2*(
-                self.porebodyPc[k]==capPres)+3*(self.snapoffPc[k]==capPres)
-            self.cnt += 1
-            self.invInsideBox += self.isinsideBox[k]
-            
-            neighb = neigh[self.hasNWFluid[neigh]]
-            self.do.check_Trapping_Clustering(
-                neighb, self.hasNWFluid.copy(), 1, self.capPresMin,True)
-            self.__computePc__(self.capPresMin, neighb)
+            ''' newly filled takes the properties of already filled neighbour '''
+            self.clusterW_ID[k] = ii
+            self.clusterW.members[ii,k] = True
+            self.connW[k] = self.clusterW[ii].connected
+            ids = ids[ids!=ii]    
+            assert ids.size>0
+
+            ''' need to coalesce '''
+            mem = self.elementListS[self.clusterW.members[ids].any(axis=0)]
+            self.clusterW.members[ii][mem] = True
+            self.clusterW.members[ids] = False
+            self.clusterW_ID[mem] = ii
         except AssertionError:
             pass
+
+        self.fillmech[k] = 1*(self.PistonPcAdv[k]==capPres)+2*(
+            self.porebodyPc[k]==capPres)+3*(self.snapoffPc[k]==capPres)
+        self.cnt += 1
+        self.invInsideBox += self.isinsideBox[k]
+        neighb = neigh[self.hasNWFluid[neigh]]
+        
+        self.do.check_Trapping_Clustering(
+            neighb.copy(), self.hasNWFluid.copy(), 1, self.capPresMin,True)
+        prev = len(self.ElemToFill)
+        self.__computePc__(self.capPresMin, neighb, trapping=False)            
 
 
     def __PImbibition__(self):
@@ -508,7 +245,8 @@ class PImbibition(TwoPhaseImbibition):
                     len(self.ElemToFill) != 0) & (
                         self.PcI[self.ElemToFill[0]] >= self.PcTarget):
                     try:
-                        assert self.connNW.sum()>0
+                        assert (self.clusterNW.members[0][self.conTToInletBdr].any() and 
+                                    self.clusterNW.members[0][self.conTToOutletBdr].any())
                         self.popUpdateWaterInj()
                     except AssertionError:
                         self.filling = False
@@ -547,36 +285,6 @@ class PImbibition(TwoPhaseImbibition):
         self.do.computePerm(self.capPresMin)
         self.resultI_str = self.do.writeResult(self.resultI_str, self.capPresMin)
         
-
-    def isNWConnected(self):
-        Notdone = (self.fluid==1)&(self.isinsideBox)&(~self.trappedNW)
-        conTToInlet = self.conTToInlet+self.nPores
-        conTToOutlet = self.conTToOutlet+self.nPores
-        try:
-            assert Notdone[conTToInlet].sum()>0
-            assert Notdone[conTToOutlet].sum()>0
-            conTToOutlet = conTToOutlet[Notdone[conTToOutlet]]
-        except AssertionError:
-            return False
-        
-        arrlist = SortedList(key=lambda i: self.distToExit[i])
-        arrlist.update(conTToInlet[Notdone[conTToInlet]])
-
-        while True:
-            try:
-                i = arrlist.pop(0)
-                Notdone[i] = False
-                arr = self.elem[i].neighbours
-                arr = arr[Notdone[arr]]
-                Notdone[arr] = False
-                assert (~Notdone[conTToOutlet]).sum()==0
-                arrlist.update(arr)
-            except AssertionError:
-                return True
-            except IndexError:
-                return False
-
-
     def __fileName__(self):
         result_dir = "./results_csv/"
         os.makedirs(os.path.dirname(result_dir), exist_ok=True)
@@ -616,13 +324,10 @@ class SecImbibition(PImbibition):
         
         self.contactAng, self.thetaRecAng, self.thetaAdvAng = self.prop_imbibition.values()
         self.is_oil_inj = False
-        self.trapped = self.trappedNW
-        self.trappedData = self.clusterNW
-        self.trapClust = self.clusterNW_ID
 
         self.do.__initCornerApex__()
         self.__computePistonPc__()
-        self.__computePc__(self.maxPc, self.elementLists, False)
+        self.__computePc__(self.maxPc, self.elementLists, trapping=False)
 
         self._areaWP = self._cornArea.copy()
         self._areaNWP = self._centerArea.copy()
@@ -633,11 +338,6 @@ class SecImbibition(PImbibition):
         if self.writeData: self.__fileName__()        
         self.writeTrappedData = writeTrappedData
 
-
-
-
-    
-
-
+        from IPython import embed; embed()
 
 

@@ -7,9 +7,7 @@ sys.path.append("./pnflowPy")
 from pnflowPy.inputData import InputData
 from pnflowPy.network import Network
 from pnflowPy.sPhase import SinglePhase
-from OstwaldRipening import PDrainage, PImbibition, SecDrainage, SecImbibition
 from plot import makePlot
-
 
 
 # __DATE__ = "Jul 25 , 2023"
@@ -29,21 +27,27 @@ def main():
             input_file_name = input("Please input data file : ")
 
         input_data = InputData(input_file_name)
+
         netsim = Network(input_file_name)
 
         # Single Phase computation
         netsim = SinglePhase(netsim)
         netsim.singlephase()
-
-        toPlot = True
-        compWithLitData = True
-        compWithPrevData = True
-        drainPlot = False
-        imbibePlot = False
-        probablePlot = False
-        writeData = True
-        writeTrappedData = True
+        writeData = False
+        writeTrappedData = False
         fillTillNWDisconnected = True
+        timeDependent = True
+        #timeDependent = False
+
+        if timeDependent:
+            from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
+            from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
+            from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
+            from timeDependency import TimeDependency
+        else:
+            from Percolation_without_Trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
+
+
 
         # two Phase simulations
         if input_data.satControl():
@@ -57,7 +61,8 @@ def main():
                  input_data.satControl()[j]
                 netsim.filling = True
 
-                if netsim.finalSat < netsim.satW:
+                try:
+                    assert netsim.finalSat < netsim.satW
                     # Drainage process
                     netsim.is_oil_inj = True
                     netsim.maxPc = Pc
@@ -76,18 +81,12 @@ def main():
                         netsim = SecDrainage(netsim, writeData=writeData, 
                                              writeTrappedData=writeTrappedData)
                     netsim.drainage()
-                    
-                    if drainPlot:
-                        drainage_results = {}
-                        drainage_results['model'] = pd.read_csv(
-                            netsim.fQ.name, names=[
-                            'satW', 'qWout', 'krw', 'qNWout', 'krnw', 'capPres', 'invasions'],
-                            sep=',', skiprows=18, index_col=False)
-    
-                else:
+
+                except AssertionError:
                     # Imbibition process
                     netsim.is_oil_inj = False
                     netsim.minPc = Pc
+                    netsim.fillTillNWDisconnected = fillTillNWDisconnected
                     if firstImbCycle:
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
                             netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
@@ -102,35 +101,19 @@ def main():
                     else:
                         netsim = SecImbibition(netsim, writeData=writeData,
                                                writeTrappedData=writeTrappedData)
+                        
                     netsim.imbibition()
 
-                    if imbibePlot:
-                        imbibition_results = {}
-                        imbibition_results['model'] = pd.read_csv(
-                            netsim.fQ.name, names=[
-                            'satW', 'qWout', 'krw', 'qNWout', 'krnw', 'capPres', 'invasions'],
-                            sep=',', skiprows=18, index_col=False)
-            
-            #netsim = Hysteresis(netsim)
-            
-            if toPlot:
-                if drainPlot:
-                    mkD = makePlot(netsim._num, netsim.title, drainage_results,
-                                   compWithLitData, compWithPrevData, True, False, include=None)
-                    mkD.pcSw()
-                    mkD.krSw()
-                if imbibePlot:
-                    mkI = makePlot(netsim._num, netsim.title, imbibition_results, 
-                                   compWithLitData, compWithPrevData, False, True, include=None)
-                    mkI.pcSw()
-                    mkI.krSw()
-                if probablePlot:
-                    mkP = makePlot(netsim._num, netsim.title, imbibition_results, True, True, False, True, include=None)
+            try:
+                assert timeDependent
+                tDependency = TimeDependency(
+                    netsim, netsim.capPresMin, steps=40000, dt=0.0027, D=2.23e-9, H=3.4e-4)           
+                tDependency.simulateOstRip(True)
+            except AssertionError:
+                pass
+                   
 
-                #from IPython import embed; embed()
-
-
-
+                   
         else:
             pass
     except Exception as exc:

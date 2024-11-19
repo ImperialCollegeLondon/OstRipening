@@ -55,9 +55,6 @@ class makePlot():
             imbibitionBank(self)
 
         
-
-        
-
     def formatFig(self, xlabel, ylabel, leg, xlim, ylim, loc=1):
         label_font = {'fontname': 'Arial', 'size': 14, 'color': 'black', 'weight': 'bold',
                       'labelpad': 10}
@@ -90,6 +87,36 @@ class makePlot():
         ax.set_xlim(xlim)
 
         plt.tight_layout()
+
+
+    def gasConcPlot(self):
+        filename = self.img_dir+'conc_vs_time_{}_{}_{}.png'.format(
+            self.title, self.label, self.num)
+        leg=[]
+        for label in self.results['timeDependency'].keys():
+            res = self.results['timeDependency'][label]
+
+            if label=='drainage_cycle_2': dT = 0.05
+            else: dT = 0.1
+
+            yarray= res[17000,:]
+            xarray = np.arange(1000)*dT
+            plt.plot(xarray, yarray)
+            leg.append(label)
+        
+        xlabel = 'time(s)'
+        ylabel = 'concentration(mol/m3)'
+        xlim=(0, 120)
+        #ylim=(0,0.05)
+        ylim=(0,None)
+        self.formatFig(xlabel, ylabel, leg, xlim, ylim)
+        plt.savefig(filename, dpi=500)
+        plt.close()
+
+        
+        #from IPython import embed; embed()
+        
+
 
             
     def pcSw(self):
