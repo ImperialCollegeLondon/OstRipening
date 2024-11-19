@@ -376,7 +376,7 @@ class TimeDependency:
             self.gasConc[self.elemToUpdate,0] = self.gasConc[self.elemToUpdate,1]
             return ii, totTime, totalTime
 
-        from IPython import embed; embed()
+        #from IPython import embed; embed()
         while totalTime < duration:
             ii, totTime, totalTime = _fff(ii, totTime, totalTime)
             print(ii)
