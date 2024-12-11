@@ -2,6 +2,7 @@ import numpy as np
 from time import time
 import math
 import os
+from scipy.optimize import bisect
 
 from analytical_numerical_study import plotClass
 
@@ -42,6 +43,7 @@ class TimeDependency:
         self.obj.satList[1:-1] = self.areaWPhase[1:-1]/self.areaSPhase[1:-1]
         self.obj.volarrayW = self.satList*self.volarray
         self.obj.volarrayNW = (1-self.satList)*self.volarray
+        self.obj.satAtMaxPc = np.nan_to_num(self.minCornerArea/self.areaSPhase)
 
         # resize the cluster arrays
         self.resizeClusters(self.clusterW, self.clusterNW)
@@ -53,6 +55,7 @@ class TimeDependency:
         self.initializingPcMolesNWCluster(self.clusterNW)
         
         # initializing moles, pc and concentration for W/NW pores/throats
+        self.netFlux = np.zeros(self.totElements)
         self.initializingMolesConcElements()
 
         # initialize the flow rates of the phases
@@ -143,33 +146,82 @@ class TimeDependency:
         # initializing cluster moles and concentrations
         self.initialPc = clust.pc.copy()
         self.initialVolume = clust.volume.copy()
+        #print('Im on line 149!!!')
+        #from IPython import embed; embed()
+        #clust.avgSatList = self._cornArea/self.areaSPhase
+        clust.avgSatList = np.nan_to_num(
+            (self._cornArea+self.areaWPhase)/(2*self.areaSPhase)) #take an average for now
         clust.moles = (
             (self.imposedP+self.initialPc)*clust.volume/(self.R*self.T)
-            + self.H*self.imposedP*self.totalVolClusters)
+            + self.H*self.initialPc*(self.totalVolClusters-clust.volume)
+            )
         self.initialMoles = clust.moles.copy()
-        self.clusterNW.molesShrink = (self.H*self.imposedP*
-            self.totalVolClusters)
+        #self.clusterNW.molesShrink = (self.H*self.imposedP*self.totalVolClusters)
+        self.clusterNW.molesShrink = (self.H*self.initialPc*self.totalVolClusters)
         self.betaLow = np.zeros(nClustNW)
         self.betaHigh = np.zeros(nClustNW)
-        clust.updateHighLow(validKeys, self)
+        clust.updateHighLow(validKeys, self, False)
+
+
+    def initializingMolesConcElements1(self):
+        # moles of gas in elements filled with WPhase are all updated
+        # but only members of NWPhase clusters not connected across 
+        # the network are updated.
+        
+        ''' initialize the brine to have conc equivalent to Pc!!! '''
+        from IPython import embed; embed()
+        #avgPres = 5000
+        avgPres = 3000
+        #avgPres = 0
+        self.gasConc[self._elemToUpdateW,0] = self.H*avgPres
+        #self.assignConcToAqElements()
+        self.dissolvedMoles[self._elemToUpdateW] = (
+           self.gasConc[self._elemToUpdateW,0]*self.volarray[self._elemToUpdateW])
+        
+        ''' initialize the NW elements according to their trapped Pc!!! '''
+        self.gasConc[self._elemToUpdateNW,0] = self.H*self.clusterNW.pc[
+            self.clusterNW_ID[self._elemToUpdateNW]]
+        
+        # self.gasConc[self._elemToUpdateNW,0] = (
+        #     (self.clusterNW.moles/self.totalVolClusters)[self.clusterNW_ID[self._elemToUpdateNW]])
 
     def initializingMolesConcElements(self):
         # moles of gas in elements filled with WPhase are all updated
         # but only members of NWPhase clusters not connected across 
         # the network are updated.
         
+        ''' initialize the NW elements according to their trapped Pc!!! '''
+        self.gasConc[self._elemToUpdateNW,0] = self.H*self.clusterNW.pc[
+            self.clusterNW_ID[self._elemToUpdateNW]]
+        
         ''' initialize the brine to have conc equivalent to Pc!!! '''
-        #print('@@@@@@@@@@@@@@@@@@@@@@@@@@')
-        #from IPython import embed; embed()
-        self.gasConc[self._elemToUpdateW,0] = self.H*self.minPc
+        # print('@@@@@@@@@@@@@@@@@@@@@@@@@')
+        # from IPython import embed; embed()
+        # self.aqAvgPres = bisect(self._funcPc, 0, self.clusterNW.pc[self.valClust].mean())
+        self.computeAqAvgPres()
+        self.gasConc[self._elemToUpdateW,0] = self.H*self.aqAvgPres
         #self.assignConcToAqElements()
         self.dissolvedMoles[self._elemToUpdateW] = (
-           self.gasConc[self._elemToUpdateW,0]*self.volarray[self._elemToUpdateW])
+            self.gasConc[self._elemToUpdateW,0]*self.volarray[self._elemToUpdateW])
         
-        ''' initialize the NW elements according to their trapped Pc!!! '''
-        self.gasConc[self._elemToUpdateNW,0] = self.H*(self.clusterNW.pc[
-            self.clusterNW_ID[self._elemToUpdateNW]]+self.imposedP)
-        
+
+    def _funcPc(self, avgPres):
+        self.gasConc[self._elemToUpdateW,0] = self.H*avgPres
+        flux = self.len_tij_valid*(
+                self.gasConc[self.TPValid, 0] - self.gasConc[self.TValid, 0])
+        return (flux[self.elemToUpdateNW[self.TValid]].sum()-
+            flux[self.elemToUpdateNW[self.TPValid]].sum())
+    
+    def computeAqAvgPres(self):
+        cond1 = (self.elemToUpdateNW[self.TPValid]&self.elemToUpdateW[self.TValid])
+        cond2 = (self.elemToUpdateW[self.TPValid]&self.elemToUpdateNW[self.TValid])
+
+        a=(self.len_tij_valid*self.clusterNW.pc[self.clusterNW_ID[self.TPValid]])[cond1].sum()
+        b=(self.len_tij_valid*self.clusterNW.pc[self.clusterNW_ID[self.TValid]])[cond2].sum()
+        c=self.len_tij_valid[cond1].sum()
+        d=self.len_tij_valid[cond2].sum()
+        self.aqAvgPres = ((a+b)/(c+d))
+    
     def findNextT(self, arrP, notdone, done):
         arrT = self.PTConnections[arrP][self.PTValid[arrP]]
         arrT = arrT[notdone[arrT]]
@@ -186,6 +238,7 @@ class TimeDependency:
         
     def findAqElements(self, arr, notdone):
         done = np.zeros(self.totElements, dtype=bool)
+        arr = arr[notdone[arr]]
         done[arr] = True
         notdone[arr] = False
 
@@ -262,61 +315,129 @@ class TimeDependency:
             self.clusterNW_ID[self._elemToUpdateNW], self.netFlux[self._elemToUpdateNW],
             len(self.clusterNW.keys))
         
+        # self.dissolvedMoles[self._elemToUpdateW] = (
+        #     self.gasConc[self._elemToUpdateW,0]*self.volarray[self._elemToUpdateW])
+
+    def determineTimeStep(self):
+        dissolvedMoles = (self.dissolvedMoles+self.netFlux*self._dt)[self._elemToUpdateW]
+        ind = self._elemToUpdateW[dissolvedMoles<0.0]
+        try:
+            self.dt = np.min(-self.dissolvedMoles[ind]/self.netFlux[ind])
+        except ValueError:
+            self.dt = self._dt
+
+        clusterMoles = (self.clusterNW.moles+self.netFluxClusters*self.dt)
+        condC = (clusterMoles<self.clusterNW.molesShrink)&self.valClust
+        try:
+            self.dt = (-(self.clusterNW.moles[condC]-self.clusterNW.molesShrink[condC])/
+                        self.netFluxClusters[condC]).min()
+            self.updateClust = True
+        except ValueError:
+            pass
+        condC = (clusterMoles>self.clusterNW.molesMax)&self.valClust
+        try:
+            self.dt = (-(self.clusterNW.molesMax[condC]-self.clusterNW.moles[condC])/
+                        self.netFluxClusters[condC]).min()
+            self.updateClust = True
+        except ValueError:
+            pass
+        if self.dt<0:
+            print('I am in dt:  {self.d}')
+            from IPython import embed; embed()
+
+       
 
     def computeMolesPcConc(self):
         ''' compute and update the moles, pc and concentration of gas in each element and cluster'''
-        try:
-            clusterMoles = self.clusterNW.moles+self.netFluxClusters*self._dt
-            assert (clusterMoles[self.valClust]>self.clusterNW.molesShrink[self.valClust]).all()
-            self.dt = self._dt 
-        except AssertionError:
-            condC = (clusterMoles<=self.clusterNW.molesShrink)&self.valClust
-            self.dt = max(
-                1e-6, (-(self.clusterNW.moles[condC]-self.clusterNW.molesShrink[condC])/
-                       self.netFluxClusters[condC]).min())
-            clusterMoles = self.clusterNW.moles+self.netFluxClusters*self.dt
-            self.updateClust = True
-            if self.dt==1e-6:
-                print(self.dt)
-                from IPython import embed; embed()
+        # try:
+        #     clusterMoles = (self.clusterNW.moles+self.netFluxClusters*self._dt)
+        #     assert (clusterMoles>self.clusterNW.molesShrink)[self.valClust].all()
+        #     self.dt = self._dt
+        #     try:
+        #         assert not (clusterMoles>=self.clusterNW.molesMax)[self.valClust].any()
+        #     except AssertionError:
+        #         self.updateClust = True
+        # except AssertionError:
+        #     condC = (clusterMoles<=self.clusterNW.molesShrink)&self.valClust
+        #     if (self.clusterNW.moles[condC]<=self.clusterNW.molesShrink[condC]).any():
+        #         self.dt = 0.0
+        #     else:
+        #         self.dt = max(
+        #             1e-6, (-(self.clusterNW.moles[condC]-self.clusterNW.molesShrink[condC])/
+        #                 self.netFluxClusters[condC]).min())
+        #         # if self.dt==1e-6:
+        #         #     print(self.dt)
+        #         #     from IPython import embed; embed()
             
-        try:
-            dissolvedMoles = (self.dissolvedMoles[self._elemToUpdateW]+
-                self.netFlux[self._elemToUpdateW]*self.dt)
-            assert (dissolvedMoles>=0.0).all()
-        except AssertionError:
-            print('Mole is negative at element level,  try a smaller time step!!!')
-            from IPython import embed; embed()
+        #     clusterMoles = (self.clusterNW.moles+self.netFluxClusters*self.dt)
+        #     self.updateClust = True
+            
+        
+        # try:
+        #     dissolvedMoles = (self.dissolvedMoles[self._elemToUpdateW]+
+        #         self.netFlux[self._elemToUpdateW]*self.dt)
+        #     assert (dissolvedMoles>=0.0).all()
+        # except AssertionError:
+        #     print('Mole is negative at element level,  try a smaller time step!!!')
+        #     from IPython import embed; embed()
+
+        self.determineTimeStep()
 
         ''' update element filled with WP properties '''
-        self.dissolvedMoles[self._elemToUpdateW] = dissolvedMoles
-        self.gasConc[self._elemToUpdateW, 1] = (
-            dissolvedMoles/self.volarray[self._elemToUpdateW])
+        self.dissolvedMoles[self._elemToUpdateW] = (
+            self.dissolvedMoles+self.netFlux*self.dt)[self._elemToUpdateW]
+        #self.dissolvedMoles[self._elemToUpdateW] = dissolvedMoles
+
+        # self.gasConc[self._elemToUpdateW, 1] = (
+        #     dissolvedMoles/self.volarray[self._elemToUpdateW])       
         
         ''' update NWP cluster properties '''
-        self.clusterNW.moles = clusterMoles
+        self.clusterNW.moles = (self.clusterNW.moles+self.netFluxClusters*self.dt)
+        #self.clusterNW.moles = clusterMoles
         toUpdateNW1 = self.toUpdateNW[self.clusterNW.moles[self.toUpdateNW]>
                                         self.initialMoles[self.toUpdateNW]]
         toUpdateNW2 = self.toUpdateNW[self.clusterNW.moles[self.toUpdateNW]<
                                         self.initialMoles[self.toUpdateNW]]
-
-        self.clusterNW.pc[toUpdateNW1] = (self.betaHigh[toUpdateNW1]*(
+        
+        print('~~~~~~~~~~~~~~~~~~~~~~~~~~')
+        from IPython import embed; embed()
+        
+        newPc = (self.betaHigh[toUpdateNW1]*(
             self.clusterNW.moles[toUpdateNW1]-self.initialMoles[toUpdateNW1]) +
             self.initialPc[toUpdateNW1])
-        self.clusterNW.volume[toUpdateNW1] = np.nan_to_num(
+        self.clusterNW.pc[toUpdateNW1] = newPc
+        try:
+            assert not any(np.isinf(newPc))
+        except AssertionError:
+            toUpdateNW1b = toUpdateNW1[np.isinf(newPc)]
+            self.clusterNW.pc[toUpdateNW1b] = (
+                (self.initialPc[toUpdateNW1b]/self.initialMoles[toUpdateNW1b])*
+                 self.clusterNW.moles[toUpdateNW1b])
+        
+        self.clusterNW.volume[toUpdateNW1] = np.minimum(
             (self.clusterNW.moles[toUpdateNW1]-self.initialMoles[toUpdateNW1])/
             (self.clusterNW.molesMax[toUpdateNW1]-self.initialMoles[toUpdateNW1])*
             (self.clusterNW.volMax[toUpdateNW1]-self.initialVolume[toUpdateNW1]) +
-            self.initialVolume[toUpdateNW1])
-        self.clusterNW.pc[toUpdateNW2] = self.betaLow[toUpdateNW2]*(
-            self.clusterNW.moles[toUpdateNW2]-self.clusterNW.molesMin[toUpdateNW2])
-        self.clusterNW.volume[toUpdateNW2] = np.nan_to_num(
+            self.initialVolume[toUpdateNW1], self.clusterNW.volMax[toUpdateNW1])
+        
+        self.clusterNW.pc[toUpdateNW2] = (self.betaLow[toUpdateNW2]*(
+            self.clusterNW.moles[toUpdateNW2]-self.clusterNW.molesShrink[toUpdateNW2]) +
+            self.clusterNW.pcShrink[toUpdateNW2])
+        
+        self.clusterNW.volume[toUpdateNW2] = np.maximum(
             (self.clusterNW.moles[toUpdateNW2]-self.clusterNW.molesMin[toUpdateNW2])/
             (self.initialMoles[toUpdateNW2]-self.clusterNW.molesMin[toUpdateNW2])*
-            self.initialVolume[toUpdateNW2])
+            self.initialVolume[toUpdateNW2], 0.0)
+        
+        try:
+            assert (self.clusterNW.pc<1e6).all()
+        except AssertionError:
+            print('there is an unrealistic pc, check line 427!!!')
+            from IPython import embed; embed()
+
         
          # update conc and moles but check if the cluster gas becomes completely dissolved
-        gasConcClusters = self.H*(self.clusterNW.pc+self.imposedP)
+        gasConcClusters = self.H*self.clusterNW.pc
         self.gasConc[self._elemToUpdateNW,1] = gasConcClusters[
             self.clusterNW_ID[self._elemToUpdateNW]]
 
@@ -325,7 +446,6 @@ class TimeDependency:
         duration = 3600*24*2  # 24-hours
         st = time()
         totalTime, totTime = 0.0, 0.0
-        self.netFlux = np.zeros(self.totElements)
         self.updateClust = False
 
         if not os.path.isfile('volarray_bent.dat'):
@@ -347,12 +467,23 @@ class TimeDependency:
         clustPc[0] = self.clusterNW.pc'''
         ii = 1
         self.clusterNW.drainEvents, self.clusterNW.imbEvents = 0, 0
+        ind = np.array([813,1103,1197,1213,1245,1448,1581,1711,1716,1720,1749,1791,1792,1803,1835,1877,1899,1904,1906,1910,1924,1951,1979,1998,2002,2003,2011,2015,2052,2057,2059,2061,2076,2144,2147,2148,2160,2162,2182,2198,2203,2213,2220,2229,2233,2260,2271,2272,2273,2275,2277,2280,2282,2283,2292,2304,2306,2307,2310,2322,2327,2330,2332,2334,2338,2355,2356,2357,2362])
+        totalVolume = self.volarray[self.elemToUpdate].sum()
         
-
         def _fff(ii, totTime, totalTime):
             self.valClustD = self.valClust & (self.clusterNW.toDrain<=self.totElements)
-            self.computeFluxes()
-            self.computeMolesPcConc()
+            try:
+                # check for further shrinkage!!!
+                assert (self.clusterNW.moles>self.clusterNW.molesShrink)[self.valClust].all()
+                self.computeAqAvgPres()
+                self.gasConc[self._elemToUpdateW,0] = self.H*self.aqAvgPres
+                self.dissolvedMoles[self._elemToUpdateW] = (
+                    self.gasConc[self._elemToUpdateW,0]*self.volarray[self._elemToUpdateW])
+                self.computeFluxes()
+                self.computeMolesPcConc()
+            except AssertionError:
+                self.dt = 0.0
+                self.updateClust = True
             try:
                 totTime += self.dt
                 #print(self.dt, totTime)
@@ -370,6 +501,8 @@ class TimeDependency:
                     self.clusterNW.shrinkCluster(keys, self)
                     self.clusterNW.imbEvents += condShrink.sum()
                     self.updateLists(toImbibe)
+                    # print('~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+                    # from IPython import embed; embed()
                     self.updateClust = False
                 except AssertionError:
                     pass
@@ -377,10 +510,9 @@ class TimeDependency:
                 try:
                     assert condGrowth.any()
                     print('^^^^^^^^^^^^^^^^^^^^^^^^^^')
-                    from IPython import embed; embed()
                     keys = np.array(self.clusterNW.keys)[condGrowth]
-                    print('$$:  ', keys)
                     toDrain = self.clusterNW.toDrain[keys]
+                    print('$$:  ', keys, toDrain)
                     #from IPython import embed; embed()
                     self.clusterNW.growCluster(keys, self)
                     self.clusterNW.drainEvents += condGrowth.sum()
@@ -388,30 +520,41 @@ class TimeDependency:
                     self.updateClust = False
                 except AssertionError:
                     pass
+
+                totalMoles = (self.volarray*self.gasConc[:,1]).sum()
                 
                 sat = (self.satList[self.isinsideBox]*self.volarray[
                     self.isinsideBox]).sum()/self.totVoidVolume
                 print(("#:%8.6g  \tSimulation Time:%12.6g  \tActual runtime:%6.6g\
                     \tTotal cluster moles:%8.6e  \tTotal dissolved moles:%6.6e\
                     \tTotal gas moles:%6.6e \tAvg Pressure:%8.6e \tNo Shrinkage:%8.6g\
-                    \tNo Growth:%8.6g \tSat:%6.6g" % (
+                    \tNo Growth:%8.6g \tSat:%6.6g \tAqAvgPres:%6.6g" % (
                 ii, round(totalTime,3), round(time()-st,3), self.clusterNW.moles.sum(), 
-                self.dissolvedMoles.sum(), self.clusterNW.moles.sum()+self.dissolvedMoles.sum(),
+                self.dissolvedMoles.sum(), totalMoles,
                 self.clusterNW.pc[self.valClust].mean(),
-                self.clusterNW.imbEvents, self.clusterNW.drainEvents, sat)))
+                self.clusterNW.imbEvents, self.clusterNW.drainEvents, sat, self.aqAvgPres)))
+
+                with open('cluster_data_pc_ini_3000.csv', 'a') as f:
+                    np.savetxt(f, [self.clusterNW.pc], delimiter=',', fmt='%g')
 
                 #gasConc[ii] = self.gasConc[:, 1] 
                 #clustPc[ii] = self.clusterNW.pc
                 #timeArray[ii] = totalTime
                 ii += 1
-            except AssertionError:
+            except AssertionError: 
                 pass
                         
+            
             self.gasConc[self.elemToUpdate,0] = self.gasConc[self.elemToUpdate,1]
             return ii, totTime, totalTime
 
         print('&&&&&&&&&&&&&&&&&&&&&&&&&&&')
         from IPython import embed; embed()
+        with open('cluster_data_pc_ini_3000.csv', 'a') as f:
+            np.savetxt(f, [ind], delimiter=',', fmt='%g')
+            np.savetxt(f, [self.clusterNW.pc[ind]], delimiter=',', fmt='%g' )
+
+        
         while totalTime < duration:
             ii, totTime, totalTime = _fff(ii, totTime, totalTime)
             print(ii)

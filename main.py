@@ -81,6 +81,9 @@ def main():
                         netsim = SecDrainage(netsim, writeData=writeData, 
                                              writeTrappedData=writeTrappedData)
                     netsim.drainage()
+                    if timeDependent:
+                        netsim.minCornerArea = netsim._cornArea.copy()
+                        netsim.prevFilled = (netsim.fluid==1)
 
                 except AssertionError:
                     # Imbibition process
@@ -101,13 +104,13 @@ def main():
                     else:
                         netsim = SecImbibition(netsim, writeData=writeData,
                                                writeTrappedData=writeTrappedData)
-                        
                     netsim.imbibition()
 
             try:
                 assert timeDependent
                 tDependency = TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=0.0027, D=2.23e-9, H=3.4e-4)           
+                    netsim, netsim.capPresMin, steps=40000, dt=0.0027, D=1.8e-9,
+                    H=6.9e-6, imposedP=1e6)           
                 tDependency.simulateOstRip(True)
             except AssertionError:
                 pass

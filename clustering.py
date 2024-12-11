@@ -11,22 +11,25 @@ class Cluster(clust):
         mem = self[k].members
         neigh = self[k].neighbours
         try:
+            assert mem.any()
             toImbibe = mem[np.argmax(self.PcI[mem])]
             self.toImbibe[k] = toImbibe
-            #self.volLow[k] = self.volume[k] - self.obj.volarrayNW[toImbibe]
-            self.pcShrink[k] = self.PcI[self.toImbibe[k]]
+            self.pcShrink[k] = max(0.0, self.PcI[self.toImbibe[k]])
             
             self.volMax[k] = other.maxNWVolarray[mem].sum()
             toDrain = neigh[np.argmin(self.PcD[neigh])]
             self.toDrain[k] = toDrain
             self.pcMax[k] = self.PcD[self.toDrain[k]]
         except ValueError:
-            pass
+            self.toDrain[k] = self.totElements+1
+            self.pcMax[k] = 1e30
+        except AssertionError:
+            self.toImbibe[k] = self.toDrain[k] = self.totElements+1
+            self.pcShrink[k], self.pcMax[k] = -1e30, 1e30
 
     def shrinkCluster(self, keys, other):
         ''' update toImbibe element(s) !!! '''
         toImbibe = self.toImbibe[keys]
-        other.gasConc[toImbibe,1] = self.H*self.imposedP
         other.dissolvedMoles[toImbibe] = other.gasConc[toImbibe,1]*self.volarray[toImbibe]
         self.moles[keys] -= other.dissolvedMoles[toImbibe]
 
@@ -34,56 +37,73 @@ class Cluster(clust):
         neigh = mem|self.neighbours[keys].any(axis=0)
         self.neighbours[keys] = False
         oldkeys = self.clusterNW_ID[mem]
+
         [*map(other.fillWithWater, toImbibe)]
         [other.unfillWithOil(self.toImbibe[k], self.pc[k], True, False, False, False) for k in keys]
             
+        other.satList[toImbibe] = 1.0
         _oldkeys = oldkeys[(self.clusterNW_ID[mem]>=0)]
+        try:
+            assert _oldkeys.size>0
+        except AssertionError:
+            return
+        
         mem = self.elementListS[mem & (self.clusterNW_ID>=0)]
         _newkeys = self.clusterNW_ID[mem]
         try:
-            assert _newkeys.max()<self.moles.size
+            assert (_oldkeys==_newkeys).all()
+            self.updateNeighMatrix(neigh[self.tList])
+            keys = np.unique(_newkeys)
+            other.initialMoles[keys] = self.moles[keys]
+            other.initialVolume[keys] = self.volume[keys]
+            other.initialPc[keys] = self.pc[keys]
+            other.totalVolClusters[keys] = np.bincount(_newkeys, self.volarray[mem])[keys]
+            [self.updateToDrainImbibe(k, other) for k in _newkeys]
+            self.updateHighLow(keys, other)
         except AssertionError:
-            self.resizeArrays(other)
-        self.updateNeighMatrix(neigh[self.tList])
-
-        initialVolume = self.volume[_oldkeys]
-        initialMoles = self.moles[_oldkeys]
-        oldVolMax = self.volMax[_oldkeys]
-        oldkeys, newkeys = mapOldNewKeys(_oldkeys, _newkeys)
-        other.satList[toImbibe] = 1.0
+            try:
+                assert _newkeys.max()<self.moles.size
+            except AssertionError:
+                self.resizeArrays(other)
+            self.updateNeighMatrix(neigh[self.tList])
+            
+            initialVolume = self.volume[_oldkeys]
+            initialMoles = self.moles[_oldkeys]
+            oldkeys, newkeys = mapOldNewKeys(_oldkeys, _newkeys)
         
-        ''' recluster the clusters!!! '''
-        self.molesShrink[oldkeys] = self.molesMin[oldkeys] = self.moles[oldkeys] = 0.0
-        self.molesMax[oldkeys] = 1e30
-        other.betaLow[oldkeys] = other.betaHigh[oldkeys] = 0.0
-        other.totalVolClusters[oldkeys] = 0.0
-           
-        ''' update the clusters'''
-        try:
-            assert newkeys.size>0
-            [self.updateToDrainImbibe(k, other) for k in newkeys]           
-            
-            other.initialVolume[newkeys] = self.volume[newkeys] = np.bincount(_newkeys, 
-                other.maxNWVolarray[mem]/oldVolMax*initialVolume,
-                self.volume.size)[newkeys]
+            ''' update the clusters'''
+            [self.updateToDrainImbibe(k, other) for k in newkeys]
             volMax=np.bincount(oldkeys, self.volMax[newkeys])
-            other.initialMoles[newkeys] = self.moles[newkeys] = np.bincount(_newkeys, 
-                other.maxNWVolarray[mem]/volMax[_oldkeys]*initialMoles,
-                self.volume.size)[newkeys]
-            
+            fr = other.maxNWVolarray[mem]/volMax[_oldkeys]
+            other.initialVolume[newkeys] = self.volume[newkeys] = np.bincount(
+                _newkeys, fr*initialVolume)[newkeys]
+            other.initialMoles[newkeys] = self.moles[newkeys] = np.bincount(
+                _newkeys, fr*initialMoles)[newkeys]
             other.initialPc[newkeys] = self.pc[newkeys]
             other.totalVolClusters[newkeys] = np.bincount(
                 _newkeys, self.volarray[mem])[newkeys]
-            self.updateHighLow(newkeys, other)
-        except AssertionError:
-            pass
+            self.updateHighLow(newkeys, other, False)
 
+            if any(self.molesShrink[newkeys]>self.moles[newkeys]):
+               print('a cluster may need further shrinking, check!!!')
+        except:
+            print('there is an error on line 89!!!')
+            from IPython import embed; embed()
+
+
+    
     def growCluster(self, keys, other):
         ''' update toDrain element(s) !!! '''
         print('Im in grow clusters!!!')
         toDrain = self.toDrain[keys]
+        self.moles[keys] += other.dissolvedMoles[toDrain]
         mem = self.members[keys].any(axis=0)
         neigh = mem|self.neighbours[keys].any(axis=0)
+        self.neighbours[keys] = False
+
+        other.initialVolume[keys] = self.volume[keys]
+        other.initialMoles[keys] = self.moles[keys]
+        other.initialPc[keys] = self.pc[keys]
 
         # unfill circular elements with water 
         toDrain1 = toDrain[self.isCircle[toDrain]]
@@ -97,39 +117,57 @@ class Cluster(clust):
         self.clusterNW_ID[toDrain] = keys
         self.members[keys, toDrain] = True
         self.updateNeighMatrix(neigh[self.tList])
-        print('Im in line 80!!!')
-        from IPython import embed; embed()
-        self.volume[keys] = (self.volarrayNW*self.members[keys]).sum(axis=1)
-        self.molesTotal[keys] = (self.moles[keys]+
-                                (other.dissolvedMoles*self.members[keys]).sum(axis=1))
-        [self.updateToDrainImbibe(k, other) for k in keys]
-        other.initialMoles[keys] = self.moles[keys]
-        self.updateHighLow(keys, other)
-        print('Im on line 93!!!')
-
-    def updateHighLow(self, newkeys, other):
-        self.molesMax[newkeys] = (
-            (other.imposedP+self.pcMax[newkeys])*self.volMax[newkeys]/(other.R*other.T)+
-            other.H*other.imposedP*other.totalVolClusters[newkeys])
-        self.molesMin[newkeys] = (other.H*other.imposedP*
-            other.totalVolClusters[newkeys])
         
-        self.molesShrink[newkeys] = self.molesMin[newkeys].copy()
-        valkeysI = newkeys[(self.size[newkeys]>1)&(self.pcShrink[newkeys]>=0.0)]
-        members = self.members[valkeysI]
-        members[np.arange(valkeysI.size), self.toImbibe[valkeysI]] = False
-        newVolMax = (other.maxNWVolarray*members).sum(axis=1)
-        volShrink = np.minimum(newVolMax,
-            (self.pcShrink[valkeysI]/other.initialPc[valkeysI])*
-            other.initialVolume[valkeysI])
-        self.molesShrink[valkeysI] += (
-            (other.imposedP+self.pcShrink[valkeysI])*volShrink/(other.R*other.T))
+        mem = self.members[keys].any(axis=0)
+        newkeys = self.clusterNW_ID[mem]
+        try:
+            other.totalVolClusters[keys] = np.bincount(newkeys, self.volarray[mem])[keys]
+        except:
+            print('there is an error on line 123!!!')
+            from IPython import embed; embed()
+        [self.updateToDrainImbibe(k, other) for k in keys]
+        self.updateHighLow(keys, other, shrink=False)
+        
 
-        other.betaLow[valkeysI] = other.initialPc[valkeysI]/(
-            other.initialMoles[valkeysI]-self.molesMin[valkeysI])
+    def updateHighLow(self, newkeys, other, update=True, shrink=True):
+        def _updateShrink():
+            self.molesShrink[newkeys] = self.molesMin[newkeys].copy()
+            valkeysI = newkeys[(self.size[newkeys]>1)&(self.pcShrink[newkeys]>=0.0)]
+            members = self.members[valkeysI]
+            members[np.arange(valkeysI.size), self.toImbibe[valkeysI]] = False
+            
+            volShrink = ((1-self.avgSatList)*self.volarray*members).sum(axis=1)
+            self.molesShrink[valkeysI] = (
+                (other.imposedP+self.pcShrink[valkeysI])*volShrink/(other.R*other.T)+
+                other.H*self.pcShrink[valkeysI]*(other.totalVolClusters[valkeysI]-volShrink))
+            
+        def _updateMax():
+            self.molesMax[newkeys] = (
+                (other.imposedP+self.pcMax[newkeys])*self.volMax[newkeys]/(other.R*other.T)+
+                other.H*self.pcMax[newkeys]*(other.totalVolClusters[newkeys]-self.volMax[newkeys]))
+            
+        try:
+            self.molesMin[newkeys] = (
+                other.H*self.pcShrink[newkeys]*other.totalVolClusters[newkeys])
+            assert update
+            try:
+                assert shrink
+                self.molesMax[newkeys] = self.molesShrink[newkeys]
+                _updateShrink()
+            except AssertionError:
+                self.molesShrink[newkeys] = self.molesMax[newkeys]
+                _updateMax()
+        except AssertionError:
+            _updateMax()
+            _updateShrink()
+        
+        other.betaLow[newkeys] = (other.initialPc[newkeys]-self.pcShrink[newkeys])/(
+            other.initialMoles[newkeys]-self.molesShrink[newkeys])
         other.betaHigh[newkeys] = (self.pcMax[newkeys]-other.initialPc[newkeys])/(
             self.molesMax[newkeys]-other.initialMoles[newkeys])
-        
+        # if any(other.betaHigh<0.0):
+        #     print('betaHigh is low!!! check')
+        #     from IPython import embed; embed()
 
     def resizeArrays(self, other):
         ct = self.pc.size - self.neighbours.shape[0]
