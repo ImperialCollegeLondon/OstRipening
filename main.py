@@ -109,7 +109,7 @@ def main():
             try:
                 assert timeDependent
                 tDependency = TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=0.0027, D=1.8e-9,
+                    netsim, netsim.capPresMin, steps=40000, dt=0.027, D=1.8e-9,
                     H=6.9e-6, imposedP=1e6)           
                 tDependency.simulateOstRip(True)
             except AssertionError:

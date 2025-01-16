@@ -61,6 +61,7 @@ class PDrainage(TwoPhaseDrainage):
 
 
     def quickClustering(self, k, arr1, capPres):
+
         try:
             ids = self.clusterNW_ID[arr1]
             kk = ids.min()
@@ -83,11 +84,10 @@ class PDrainage(TwoPhaseDrainage):
             ''' create a new cluster for k'''
             mem = np.zeros(self.totElements, dtype=bool)
             mem[k] = True
-            arrDict = {}
             trappedStatus = ~(self.elem[k].neighbours<=0).any()
-            arrDict[1] = {'members': mem, 'connStatus': False, 'trappedStatus': trappedStatus}
+            arrDict = {1:{'members': mem, 'connStatus': False, 'trappedStatus': trappedStatus}}
             self.clusterNW.clustering(
-                arrDict, capPres, self.clusterNW_ID, self.clusterNW, self.trappedNW)
+                np.array([k]), arrDict, capPres, self.clusterNW_ID, self.clusterNW, self.trappedNW, True)
         except AssertionError:
             pass
     
@@ -171,7 +171,7 @@ class PImbibition(TwoPhaseImbibition):
         return obj
     
     def __init__(self, obj, writeData=False, writeTrappedData=True):
-        super().__init__(obj, writeData=writeData, trapping=False)
+        super().__init__(obj, writeData=writeData, writeTrappedData=False)
         self.writeData = writeData
         self.writeTrappedData = writeTrappedData
 
@@ -245,7 +245,7 @@ class PImbibition(TwoPhaseImbibition):
                     len(self.ElemToFill) != 0) & (
                         self.PcI[self.ElemToFill[0]] >= self.PcTarget):
                     try:
-                        assert (self.clusterNW.members[0][self.conTToInletBdr].any() and 
+                        assert (self.clusterNW.members[0][self.conTToIn].any() and 
                                     self.clusterNW.members[0][self.conTToOutletBdr].any())
                         self.popUpdateWaterInj()
                     except AssertionError:
@@ -338,6 +338,6 @@ class SecImbibition(PImbibition):
         if self.writeData: self.__fileName__()        
         self.writeTrappedData = writeTrappedData
 
-        from IPython import embed; embed()
+        # from IPython import embed; embed()
 
 
