@@ -6,8 +6,12 @@ import pandas as pd
 sys.path.append("./pnflowPy")
 from pnflowPy.inputData import InputData
 from pnflowPy.network import Network
-from pnflowPy.sPhase import SinglePhase
-from plot import makePlot
+import pnflowPy.sPhase as sPhase
+import pnflowPy.tPhaseD as tPhaseD
+import pnflowPy.tPhaseImb as tPhaseImb
+import pnflowPy.SecondaryDrainage as secDrain
+import pnflowPy.SecondaryImbibition as secImbibe
+
 
 
 # __DATE__ = "Jul 25 , 2023"
@@ -27,12 +31,12 @@ def main():
             input_file_name = input("Please input data file : ")
 
         input_data = InputData(input_file_name)
-
         netsim = Network(input_file_name)
 
-        # Single Phase computation
-        netsim = SinglePhase(netsim)
-        netsim.singlephase()
+        # Single Phase computation 
+        sPhase.initialize(netsim)
+        sPhase.singlephase(netsim)
+        
         writeData = False
         writeTrappedData = False
         fillTillNWDisconnected = True
@@ -42,17 +46,20 @@ def main():
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
             from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
-            from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
+            from pnflowPy.SecondaryDrainage import SecDrainage
+            from pnflowPy.SecondaryImbibition import SecImbibition
+            #from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
             from timeDependency import TimeDependency
+            import timeDependency as tDependency
         else:
             from Percolation_without_Trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
-
 
 
         # two Phase simulations
         if input_data.satControl():
             firstDrainCycle = True
             firstImbCycle = True
+            netsim.cycle = 0
             for j in range(len(input_data.satControl())):
                 netsim.finalSat, Pc, netsim.dSw, netsim.minDeltaPc,\
                  netsim.deltaPcFraction, netsim.calcKr, netsim.calcI,\
@@ -70,17 +77,18 @@ def main():
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
                             netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
                                 'INIT_CONT_ANG')
-                        netsim = PDrainage(netsim, writeData=writeData, 
-                                           writeTrappedData=writeTrappedData)
+                        PDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                        tPhaseD.initialize(netsim)
                         netsim.prop_drainage = {}
                         netsim.prop_drainage['contactAng'] = netsim.contactAng.copy()
                         netsim.prop_drainage['thetaRecAng'] = netsim.thetaRecAng.copy()
                         netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
                         firstDrainCycle = False
                     else:
-                        netsim = SecDrainage(netsim, writeData=writeData, 
-                                             writeTrappedData=writeTrappedData)
-                    netsim.drainage()
+                        SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                        secDrain.initialize(netsim)
+                    
+                    tPhaseD.drainage(netsim)
                     if timeDependent:
                         netsim.minCornerArea = netsim._cornArea.copy()
                         netsim.prevFilled = (netsim.fluid==1)
@@ -94,24 +102,27 @@ def main():
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
                             netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
                                 'EQUIL_CON_ANG')
-                        netsim = PImbibition(netsim, writeData=writeData,
-                                             writeTrappedData=writeTrappedData)
+                        PImbibition(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                        tPhaseImb.initialize(netsim)
                         netsim.prop_imbibition = {}
                         netsim.prop_imbibition['contactAng'] = netsim.contactAng.copy()
                         netsim.prop_imbibition['thetaRecAng'] = netsim.thetaRecAng.copy()
                         netsim.prop_imbibition['thetaAdvAng'] = netsim.thetaAdvAng.copy()
                         firstImbCycle = False
                     else:
-                        netsim = SecImbibition(netsim, writeData=writeData,
-                                               writeTrappedData=writeTrappedData)
-                    netsim.imbibition()
+                        SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
+                        secImbibe.initialize(netsim)
+            
+                    tPhaseImb.imbibition(netsim)
 
             try:
                 assert timeDependent
-                tDependency = TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=0.027, D=1.8e-9,
-                    H=6.9e-6, imposedP=1e6)           
-                tDependency.simulateOstRip(True)
+                TimeDependency(
+                    netsim, netsim.capPresMin, steps=40000, dt=0.054, D=1.8e-9,
+                    H=6.9e-6, imposedP=1e6)
+                tDependency.initialize(netsim)
+                tDependency.simulateOstRip(netsim)
+                
             except AssertionError:
                 pass
                    

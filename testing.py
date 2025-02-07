@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from plot import makePlot
 
 
@@ -14,18 +15,20 @@ title = 'Bentheimer'
 drain = False
 imbibe = False
 probable = True
-hysteresis = True
-includeTrapping = True
-scaled = True
+hysteresis = False
+includeTrapping = False
+scaled = False
 plotDist = True
+timeDependency = True
+do = False
 
 
-results = {'drainage':{}, 'imbibition':{}}
+results = {'drainage':{}, 'imbibition':{}, 'timeDependency':{}}
 cycle=3
 for i in range(1,cycle+1):
     label = 'wt'
     cycleLabel = 'cycle'+str(i)
-    if includeTrapping or scaled:
+    if do and (includeTrapping or scaled):
         results['drainage'][label+'_'+cycleLabel] = pd.read_csv(
             './results_csv/Flowmodel_{}_Drainage_{}_wt_{}.csv'.format(
                 title, cycleLabel, numDict['wt']), names=[
@@ -50,7 +53,8 @@ for i in range(1,cycle+1):
                     title, cycleLabel, numDict['wt']), names=[
                 'rad', 'volume', 'fluid', 'trappedW', 'trappedNW'],
                 sep=',', skiprows=1, index_col=False)
-    if not includeTrapping or scaled:
+            
+    if do and (not includeTrapping or scaled):
         label = 'nt'
         results['drainage'][label+'_'+cycleLabel] = pd.read_csv(
             './results_csv/Flowmodel_{}_Drainage_{}_nt_{}.csv'.format(
@@ -75,6 +79,20 @@ for i in range(1,cycle+1):
                     title, cycleLabel, numDict['nt']), names=[
                 'rad', 'volume', 'fluid', 'trappedW', 'trappedNW'],
                 sep=',', skiprows=1, index_col=False)
+
+
+    
+cycle=2
+num = 1
+if timeDependency:
+    #cols = pd.read_csv('./results_csv/gasConc_drainage_cycle_{}_{}.txt'.format(cycle, num),
+     #                       delimiter=',', nrows=1)
+    results['timeDependency']['drainage_cycle_{}'.format(cycle)] = np.loadtxt(
+        './results_csv/gasConc_drainage_cycle_{}_{}.txt'.format(cycle, num), delimiter=',')
+    results['timeDependency']['imbibition_cycle_{}'.format(cycle)] = np.loadtxt(
+        './results_csv/gasConc_imbibition_cycle_{}_{}.txt'.format(cycle, num), delimiter=',')
+    
+    #from IPython import embed; embed()
         
 
 #print(results)
@@ -112,5 +130,9 @@ if hysteresis:
         #mkH.krSwScaled()
         #mkH.krSwProposed()
         mkH.plotDistribution()
+
+if timeDependency:
+    mkT = makePlot(num, title, results)
+    mkT.gasConcPlot()
     
     
