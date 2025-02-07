@@ -1,5 +1,7 @@
 import numpy as np
 from pnflowPy.clustering import Cluster as clust
+import timeDependency as tD
+import pnflowPy.tPhaseImb as tPhaseImb
     
 
 class Cluster(clust):
@@ -46,7 +48,7 @@ class Cluster(clust):
         self.pc[key] = newPc[key]
         pc = newPc[other.clusterNW_ID]
         pc[other.clusterNW_ID<0] = 0.0
-        other.__CondTPImbibition__(arr, pc, False)
+        tPhaseImb.__CondTPImbibition__(other, arr, pc, False)
         other.trappedW[arr], other.trappedNW[arr] = oldWStatus, oldNWStatus
         self.pc[key] = oldPc
 
@@ -71,17 +73,12 @@ class Cluster(clust):
         self.neighbours[keys] = False
         oldkeys = other.clusterNW_ID.copy()
 
-        [*map(other.fillWithWater, toImbibe)]
-        [other.unfillWithOil(self.toImbibe[k], self.pc[k], True, False, False, False) for k in keys]
+        [tPhaseImb.fillWithWater(other, i) for i in toImbibe]
+        [tPhaseImb.unfillWithOil(
+            other, self.toImbibe[k], self.pc[k], True, False, False, False) for k in keys]
             
         other.satList[toImbibe] = 1.0
         newMem = mem & (other.clusterNW_ID>=0)
-        # try:
-        #     assert mem.any()
-        #     initialVolume = self.volume.copy()
-        #     initialMoles = self.moles.copy()
-        # except AssertionError:
-        #     return
         _oldkeys = oldkeys[newMem]
         _newkeys = other.clusterNW_ID[newMem]
         try:
@@ -94,10 +91,11 @@ class Cluster(clust):
             other.initialPc[newkeys] = self.pc[newkeys]
             other.initialCornerArea[newMem] = other.cornerArea[newMem]
             self.totalVolume[newkeys] = np.bincount(_newkeys, other.volarray[newMem])[newkeys]
-            other.updateVolumeShrinkMax(self, newkeys)
-            #[self.updateToDrainImbibe(k, other) for k in _newkeys]
+            tD.updateVolumeShrinkMax(other, self, newkeys)
             self.updateMolesShrinkGrowth(newkeys, other)
-            #self.updateHighLow(keys, other)
+            for c in newkeys:
+                other.neighbouringClusters[c] = tD.findNeighbouringClusters(
+                c, other.totElements, other.nPores, self.members, self.neighbours, other.clusterNW_ID, other.PTConnections, other.PTValid, other.TPConnections, other.TPCond, other.elemToUpdate)
         except AssertionError:
             _keys, newkeys = mapOldNewKeys(_oldkeys, _newkeys)
             try:
@@ -107,13 +105,6 @@ class Cluster(clust):
             self.updateNeighMatrix(neigh[other.tList])
             
             ''' update the clusters'''
-            
-            # _newMem = newMem.copy()
-            # _newMem[newMem] = (_oldkeys!=_newkeys)
-            # cond = np.zeros(other.totElements, dtype=bool)
-            # cond[mem[_oldkeys != _newkeys]] = True
-            # cond = (_keys!=newkeys)
-            # _keys, newkeys = _keys[cond], newkeys[cond]
             initialMoles = self.moles[_keys]
             initialVolume = self.computeVolume(newkeys, newMem, oldkeys, other)
             other.initialVolume[newkeys] = self.volume[newkeys]
@@ -122,31 +113,15 @@ class Cluster(clust):
             other.initialPc[newkeys] = self.pc[newkeys]
             other.initialCornerArea[newMem] = other.cornerArea[newMem]
             self.totalVolume[newkeys] = np.bincount(_newkeys, other.volarray[newMem])[newkeys]
-            other.updateVolumeShrinkMax(self, newkeys)
+            tD.updateVolumeShrinkMax(other, self, newkeys)
 
-            #[self.updateToDrainImbibe(k, other) for k in newkeys]
-            #volMax=np.bincount(oldkeys, self.volMax[newkeys])
-            # print("::::::::::@@@@@@@@@@@@@@@@@@@")
-            # from IPython import embed; embed()
-            #fr = other.maxNWVolarray[mem]/volMax[_oldkeys]
-            # fr_bin = np.bincount(_oldkeys, fr) 
-            # if not np.isclose(fr_bin[fr_bin!=0.0],1.0).all():
-            #     print("::::::::::@@@@@@@@@@@@@@@@@@@")
-            #     from IPython import embed; embed()
-
-            # other.initialVolume[newkeys] = self.volume[newkeys] = np.bincount(
-            #     _newkeys, fr*initialVolume)[newkeys]
-            # other.initialMoles[newkeys] = self.moles[newkeys] = np.bincount(
-            #     _newkeys, fr*initialMoles)[newkeys]
-            # self.initialPc[newkeys] = self.pc[newkeys]
-            # self.totalVolume[newkeys] = np.bincount(
-            #     _newkeys, other.volarray[mem])[newkeys]
-            #self.updateHighLow(newkeys, other, False)
             self.updateMolesShrinkGrowth(newkeys, other)
+            for c in newkeys:
+                other.neighbouringClusters[c] = tD.findNeighbouringClusters(
+                c, other.totElements, other.nPores, self.members, self.neighbours, other.clusterNW_ID, other.PTConnections, other.PTValid, other.TPConnections, other.TPCond, other.elemToUpdate)
 
             if any(self.molesShrink[newkeys]>self.moles[newkeys]):
                print('a cluster may need further shrinking, check!!!')
-               #from IPython import embed; embed()
         except ValueError:
             pass
         except:
@@ -195,8 +170,6 @@ class Cluster(clust):
         other.hasNWFluid[toDrain] = True
         other.clusterNW_ID[toDrain] = keys
         self.members[keys, toDrain] = True
-        # if 797 in keys:
-        #     from IPython import embed; embed()
         self.updateNeighMatrix(neigh[other.tList])
 
         newkeys = np.unique(other.clusterNW_ID[mem])
@@ -212,10 +185,11 @@ class Cluster(clust):
 
         self.totalVolume[newkeys] = np.bincount(
             other.clusterNW_ID[mem], other.volarray[mem])[newkeys]
-        other.updateVolumeShrinkMax(self, newkeys)
-        #[self.updateToDrainImbibe(k, other) for k in newkeys]
-        #self.updateHighLow(newkeys, other, shrink=False)
+        tD.updateVolumeShrinkMax(other, self, newkeys)
         self.updateMolesShrinkGrowth(newkeys, other)
+        for c in newkeys:
+            other.neighbouringClusters[c] = tD.findNeighbouringClusters(
+                c, other.totElements, other.nPores, self.members, self.neighbours, other.clusterNW_ID, other.PTConnections, other.PTValid, other.TPConnections, other.TPCond, other.elemToUpdate)
     
 
     def updateHighLow(self, newkeys, other, update=True, shrink=True):
@@ -275,8 +249,6 @@ class Cluster(clust):
 def mapOldNewKeys(oldkeys, newkeys):
     ''' returns unique pairs of old and new keys '''
     i=0
-    # oldkeys = oldkeys[newkeys>=0]
-    # newkeys = newkeys[newkeys>=0]
     while True:
         try:
             cond = (newkeys!=newkeys[i])
