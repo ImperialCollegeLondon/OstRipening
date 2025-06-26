@@ -44,6 +44,8 @@ def main():
         freshStart = True
         freshStartDrain = False
         freshStartImb = False
+        saveDrainage = False
+        saveImbibition = False
         #timeDependent = False
 
         if timeDependent:
@@ -60,6 +62,8 @@ def main():
             firstDrainCycle = True
             firstImbCycle = True
             netsim.cycle = 0
+            netsim.saveDrainage = saveDrainage
+            netsim.saveImbibition = saveImbibition
             for j in range(len(input_data.satControl())):
                 netsim.finalSat, Pc, netsim.dSw, netsim.minDeltaPc,\
                  netsim.deltaPcFraction, netsim.calcKr, netsim.calcI,\
