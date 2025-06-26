@@ -9,9 +9,8 @@ from pnflowPy.network import Network
 import pnflowPy.sPhase as sPhase
 import pnflowPy.tPhaseD as tPhaseD
 import pnflowPy.tPhaseImb as tPhaseImb
-import pnflowPy.SecondaryProcesses as secDrain
-import pnflowPy.SecondaryImbibition as secImbibe
 import pnflowPy.utilities as do
+import dill
 
 
 
@@ -42,24 +41,19 @@ def main():
         writeTrappedData = False
         fillTillNWDisconnected = True
         timeDependent = True
+        freshStart = True
+        freshStartDrain = False
+        freshStartImb = False
         #timeDependent = False
 
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
             from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
-            # from pnflowPy.SecondaryProcesses import SecDrainage
-            # from pnflowPy.SecondaryImbibition import SecImbibition
             from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
             from timeDependency import TimeDependency
             import timeDependency as tDependency
         else:
             from percolation_without_trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
-
-        # from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
-        # from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
-        # from pnflowPy.SecondaryProcesses import SecDrainage
-        # from pnflowPy.SecondaryImbibition import SecImbibition
-        # from timeDependency import TimeDependency
 
         # two Phase simulations
         if input_data.satControl():
@@ -81,8 +75,7 @@ def main():
                     netsim.maxPc = Pc
                     if firstDrainCycle:
                         (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
-                            netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
-                                'INIT_CONT_ANG')
+                            netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng('INIT_CONT_ANG')
                         PDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
                         tPhaseD.initialize(netsim)
                         netsim.prop_drainage = {}
@@ -92,14 +85,17 @@ def main():
                         firstDrainCycle = False
                     else:
                         SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
-                        #tPhaseD.popUpdateOilInj = SecDrainage.popUpdateOilInj
                         SecDrainage.initialize(netsim)
+                    
+                    try:
+                        assert freshStartDrain
+                        tPhaseD.drainage(netsim)
+                    except AssertionError:
+                        with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                               f"drainage.pkl"), "rb") as f:
+                            loaded_obj = dill.load(f)
+                        do.updateObj(netsim, loaded_obj)
                         
-                    tPhaseD.drainage(netsim)
-                    if timeDependent:
-                        netsim.minCornerArea = netsim._cornArea.copy()
-                        netsim.prevFilled = (netsim.fluid==1)
-
                 except AssertionError:
                     # Imbibition process
                     netsim.is_oil_inj = False
@@ -119,14 +115,18 @@ def main():
                     else:
                         SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
                         SecImbibition.initialize(netsim)
-            
-                    tPhaseImb.imbibition(netsim)
+                    try:
+                        assert freshStartImb
+                        tPhaseImb.imbibition(netsim)
+                    except AssertionError:
+                        with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                               f"imbibition.pkl"), "rb") as f:
+                            loaded_obj = dill.load(f)
+                        do.updateObj(netsim, loaded_obj)
 
-            #print('Im done with imbibition!!!')
-            #from IPython import embed; embed()
+            #timeDependent = False
             try:
                 assert timeDependent
-                freshStart = True
                 TimeDependency(
                     netsim, netsim.capPresMin, steps=40000, dt=0.054, 
                     D=1.8e-9,
