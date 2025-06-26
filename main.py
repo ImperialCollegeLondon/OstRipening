@@ -1,7 +1,7 @@
 from datetime import date
 import sys
 import os
-import pandas as pd
+import numpy as np
 
 sys.path.append("./pnflowPy")
 from pnflowPy.inputData import InputData
@@ -9,8 +9,9 @@ from pnflowPy.network import Network
 import pnflowPy.sPhase as sPhase
 import pnflowPy.tPhaseD as tPhaseD
 import pnflowPy.tPhaseImb as tPhaseImb
-import pnflowPy.SecondaryDrainage as secDrain
+import pnflowPy.SecondaryProcesses as secDrain
 import pnflowPy.SecondaryImbibition as secImbibe
+import pnflowPy.utilities as do
 
 
 
@@ -46,14 +47,19 @@ def main():
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
             from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
-            from pnflowPy.SecondaryDrainage import SecDrainage
-            from pnflowPy.SecondaryImbibition import SecImbibition
-            #from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
+            # from pnflowPy.SecondaryProcesses import SecDrainage
+            # from pnflowPy.SecondaryImbibition import SecImbibition
+            from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
             from timeDependency import TimeDependency
             import timeDependency as tDependency
         else:
-            from Percolation_without_Trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
+            from percolation_without_trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
 
+        # from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
+        # from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
+        # from pnflowPy.SecondaryProcesses import SecDrainage
+        # from pnflowPy.SecondaryImbibition import SecImbibition
+        # from timeDependency import TimeDependency
 
         # two Phase simulations
         if input_data.satControl():
@@ -86,8 +92,9 @@ def main():
                         firstDrainCycle = False
                     else:
                         SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
-                        secDrain.initialize(netsim)
-                    
+                        #tPhaseD.popUpdateOilInj = SecDrainage.popUpdateOilInj
+                        SecDrainage.initialize(netsim)
+                        
                     tPhaseD.drainage(netsim)
                     if timeDependent:
                         netsim.minCornerArea = netsim._cornArea.copy()
@@ -111,17 +118,47 @@ def main():
                         firstImbCycle = False
                     else:
                         SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
-                        secImbibe.initialize(netsim)
+                        SecImbibition.initialize(netsim)
             
                     tPhaseImb.imbibition(netsim)
 
+            #print('Im done with imbibition!!!')
+            #from IPython import embed; embed()
             try:
                 assert timeDependent
+                freshStart = True
                 TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=0.054, D=1.8e-9,
-                    H=6.9e-6, imposedP=1e6)
-                tDependency.initialize(netsim)
-                tDependency.simulateOstRip(netsim)
+                    netsim, netsim.capPresMin, steps=40000, dt=0.054, 
+                    D=1.8e-9,
+                    #D=5e-9,
+                    H=6.9e-6,
+                    #H=1.2e-7,
+                    imposedP=1e6)
+                try:
+                    assert freshStart
+                    tDependency.initialize(netsim)
+                    #tDependency.recomputeClusterVolume(netsim)
+                except AssertionError:
+                    pass
+                tDependency.simulateOstRip(netsim, freshStart=freshStart)
+                
+                #print('::::::::::::::::::::::::::::')
+                #from IPython import embed; embed()
+                netsim.filling = True
+                netsim.capPresMax = netsim.maxPc = netsim.aqAvgPres
+                netsim.fillTillNWDisconnected = False
+                netsim.minPc = netsim.Pc
+                SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
+                SecImbibition.initialize(netsim)
+                netsim._areaWP[:] = netsim.satList*netsim.areaSPhase
+                netsim._areaNWP[:] = (1-netsim.satList)*netsim.areaSPhase
+                arr = np.ones(netsim.totElements, dtype=bool)
+                newPc = netsim.clusterNW.pc[netsim.clusterNW_ID]
+                
+                tPhaseImb.__CondTPImbibition__(netsim, arr, newPc, True, True)
+                netsim.satW = do.Saturation(netsim, netsim.areaWPhase, netsim.areaSPhase)
+                do.computePerm(netsim, netsim.capPresMin)
+                tPhaseImb.imbibition(netsim)
                 
             except AssertionError:
                 pass
