@@ -19,7 +19,7 @@ import pnflowPy.tPhaseImb as tPhaseImb
 #MEMORY_DIR = "./joblib_memmap_new"
 MEMORY_DIR = "./ostrip_initial_Pc_clusterPc_equal_PcD_and_PcI_alpha_070_latest"
 #MEMORY_DIR = "./ostrip_initial_0_PcD_equal_PistonPcRec_and_PcI_alpha_040_imposedP_2MPa"
-MEMORY_DIR = "./ostrip_initial_Pc_PcD_equal_PistonPcRec_maxPc_8015_test_25062025"
+MEMORY_DIR = "./ostrip_initial_0_PcD_equal_PistonPcRec_maxPc_2e4_test_25062025"
 os.makedirs(MEMORY_DIR, exist_ok=True)
 global_memmaps = {}
 memmap_shapes = {} 
@@ -303,15 +303,15 @@ def settingUpArrays(self, clust, excludeCircles=False):
     ''' sets up useful arrays for the time-dependent simulation '''
 
     # identify valid pore-throat pairs and clusters
-    self.TValid = np.dstack((self.tList, self.tList))[0]
-    if excludeCircles:
-        self.TPCond = (self.TPConnections>0)&self.isPolygon[self.TPConnections]
-        self.TPCond[1:] = self.TPCond[1:]&self.isPolygon[self.TValid]
-    else:
-        self.TPCond = (self.TPConnections>0) # location of valid pores connected to each throats
+    # self.TValid = np.dstack((self.tList, self.tList))[0]
+    # if excludeCircles:
+    #     self.TPCond = (self.TPConnections>0)&self.isPolygon[self.TPConnections]
+    #     self.TPCond[1:] = self.TPCond[1:]&self.isPolygon[self.TValid]
+    # else:
+    #     self.TPCond = (self.TPConnections>0) # location of valid pores connected to each throats
 
-    self.TValid = self.TValid[self.TPCond[1:]] # valid throats (Oren)
-    self.TPValid = self.TPConnections[self.TPCond] # valid pores connected to each throats
+    # self.TValid = self.TValid[self.TPCond[1:]] # valid throats (Oren)
+    # self.TPValid = self.TPConnections[self.TPCond] # valid pores connected to each throats
     self.tValid = self.TValid-self.nPores-1
     self.valClust = (clust.members.any(axis=1)) # returns valid clusters
     #print('??????/////////MMMMMMMMMMMMMNNNNNNNNNNNNNNNoooo')
@@ -439,9 +439,9 @@ def initializingMolesConcElements(self):
     
     ''' initialize the brine to have conc equivalent to Pc!!! '''
     #self.computeAqAvgPres()
-    self.aqAvgPres = self.Pc
+    #self.aqAvgPres = self.Pc
     #self.aqAvgPres = 3000
-    #self.aqAvgPres = 0
+    self.aqAvgPres = 0
     self.gasConc[self._elemToUpdateW,0] = self.H*self.aqAvgPres
     #self.assignConcToAqElements()
     # self.dissolvedMoles[self._elemToUpdateW] = (

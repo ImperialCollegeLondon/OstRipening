@@ -1,0 +1,23 @@
+name: flowenv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - petsc=3.20
+  - petsc4py
+  - tbb=2021.12.0
+  - numpy
+  - scipy
+  - matplotlib
+  - h5py
+  - mpi4py
+  - scikit-learn
+  - pandas
+  - dill
+  - sortedcontainers
+  - numba
+  - pyqt
+  - pip
+  - pip:
+      - pyamg
