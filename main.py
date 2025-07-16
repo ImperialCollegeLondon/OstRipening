@@ -41,12 +41,12 @@ def main():
         writeTrappedData = False
         fillTillNWDisconnected = True
         timeDependent = True
-        freshStart = True
-        freshStartDrain = False
-        freshStartImb = False
-        saveDrainage = False
+        saveDrainage = True
         saveImbibition = False
         #timeDependent = False
+        skip_drainage_imbibition = False
+        skip_drainage = False
+        skip_imbibition = False
 
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
@@ -58,7 +58,7 @@ def main():
             from percolation_without_trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
 
         # two Phase simulations
-        if input_data.satControl():
+        if not skip_drainage_imbibition and input_data.satControl():
             firstDrainCycle = True
             firstImbCycle = True
             netsim.cycle = 0
@@ -72,105 +72,123 @@ def main():
                  input_data.satControl()[j]
                 netsim.filling = True
 
-                try:
-                    assert netsim.finalSat < netsim.satW
+                if netsim.finalSat < netsim.satW:
                     # Drainage process
-                    netsim.is_oil_inj = True
-                    netsim.maxPc = Pc
-                    if firstDrainCycle:
-                        (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
-                            netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng('INIT_CONT_ANG')
-                        PDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
-                        tPhaseD.initialize(netsim)
-                        netsim.prop_drainage = {}
-                        netsim.prop_drainage['contactAng'] = netsim.contactAng.copy()
-                        netsim.prop_drainage['thetaRecAng'] = netsim.thetaRecAng.copy()
-                        netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
-                        firstDrainCycle = False
-                    else:
-                        SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
-                        SecDrainage.initialize(netsim)
-                    
-                    try:
-                        assert freshStartDrain
-                        tPhaseD.drainage(netsim)
-                    except AssertionError:
+                    if skip_drainage:
+                        print('11111111111111')
                         with open(os.path.join(f'./saved_simulation_{netsim.title}', 
-                                               f"drainage.pkl"), "rb") as f:
+                                               f"drainage_999999.pkl"), "rb") as f:
                             loaded_obj = dill.load(f)
+                            #netsim = dill.load(f)
+                        print('333333333333333333')
                         do.updateObj(netsim, loaded_obj)
+                        print('2222222222222222')
+                        #from IPython import embed; embed()
                         
-                except AssertionError:
-                    # Imbibition process
-                    netsim.is_oil_inj = False
-                    netsim.minPc = Pc
-                    netsim.fillTillNWDisconnected = fillTillNWDisconnected
-                    if firstImbCycle:
-                        (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
-                            netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
-                                'EQUIL_CON_ANG')
-                        PImbibition(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
-                        tPhaseImb.initialize(netsim)
-                        netsim.prop_imbibition = {}
-                        netsim.prop_imbibition['contactAng'] = netsim.contactAng.copy()
-                        netsim.prop_imbibition['thetaRecAng'] = netsim.thetaRecAng.copy()
-                        netsim.prop_imbibition['thetaAdvAng'] = netsim.thetaAdvAng.copy()
-                        firstImbCycle = False
+                        netsim.areaWPhase = netsim._areaWP.view()
+                        netsim.areaNWPhase = netsim._areaNWP.view()
+                        netsim.gWPhase = netsim._condWP.view()
+                        netsim.gNWPhase = netsim._condNWP.view()
+                        
                     else:
-                        SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
-                        SecImbibition.initialize(netsim)
-                    try:
-                        assert freshStartImb
-                        tPhaseImb.imbibition(netsim)
-                    except AssertionError:
+                        netsim.is_oil_inj = True
+                        netsim.maxPc = Pc
+                        if firstDrainCycle:
+                            (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
+                                netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng('INIT_CONT_ANG')
+                            PDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            tPhaseD.initialize(netsim)
+                            netsim.prop_drainage = {}
+                            netsim.prop_drainage['contactAng'] = netsim.contactAng.copy()
+                            netsim.prop_drainage['thetaRecAng'] = netsim.thetaRecAng.copy()
+                            netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                        else:
+                            SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            SecDrainage.initialize(netsim)
+                            
+                        tPhaseD.drainage(netsim)
+                    firstDrainCycle = False
+                        
+                        
+                else:
+                    # Imbibition process
+                    if skip_imbibition:
                         with open(os.path.join(f'./saved_simulation_{netsim.title}', 
-                                               f"imbibition.pkl"), "rb") as f:
+                                               f"imbibition_1365_67.pkl"), "rb") as f:
                             loaded_obj = dill.load(f)
                         do.updateObj(netsim, loaded_obj)
+                    else:
+                        netsim.is_oil_inj = False
+                        netsim.minPc = Pc
+                        netsim.fillTillNWDisconnected = fillTillNWDisconnected
+                        
+                        if firstImbCycle:
+                            (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
+                                netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
+                                    'EQUIL_CON_ANG')
+                                    
+                            PImbibition(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            tPhaseImb.initialize(netsim)
+                            netsim.prop_imbibition = {}
+                            netsim.prop_imbibition['contactAng'] = netsim.contactAng.copy()
+                            netsim.prop_imbibition['thetaRecAng'] = netsim.thetaRecAng.copy()
+                            netsim.prop_imbibition['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                            firstImbCycle = False
+                        else:
+                            SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
+                            SecImbibition.initialize(netsim)
+                        
+                        tPhaseImb.imbibition(netsim)
+                       
+                            
 
-            #timeDependent = False
+        #timeDependent = False
+        
+        with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                           f"imbibition_1365.pkl"), "rb") as f:
+            loaded_obj = dill.load(f)
+        do.updateObj(netsim, loaded_obj)
+        try:
+            assert timeDependent
+            TimeDependency(
+                netsim, netsim.capPresMin, steps=40000, dt=0.054, 
+                D=1.8e-9,
+                #D=5e-9,
+                H=6.9e-6,
+                #H=1.2e-7,
+                imposedP=1e6)
             try:
-                assert timeDependent
-                TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=0.054, 
-                    D=1.8e-9,
-                    #D=5e-9,
-                    H=6.9e-6,
-                    #H=1.2e-7,
-                    imposedP=1e6)
-                try:
-                    assert freshStart
-                    tDependency.initialize(netsim)
-                    #tDependency.recomputeClusterVolume(netsim)
-                except AssertionError:
-                    pass
-                tDependency.simulateOstRip(netsim, freshStart=freshStart)
-                
-                #print('::::::::::::::::::::::::::::')
-                #from IPython import embed; embed()
-                netsim.filling = True
-                netsim.capPresMax = netsim.maxPc = netsim.aqAvgPres
-                netsim.fillTillNWDisconnected = False
-                netsim.minPc = netsim.Pc
-                SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
-                SecImbibition.initialize(netsim)
-                netsim._areaWP[:] = netsim.satList*netsim.areaSPhase
-                netsim._areaNWP[:] = (1-netsim.satList)*netsim.areaSPhase
-                arr = np.ones(netsim.totElements, dtype=bool)
-                newPc = netsim.clusterNW.pc[netsim.clusterNW_ID]
-                
-                tPhaseImb.__CondTPImbibition__(netsim, arr, newPc, True, True)
-                netsim.satW = do.Saturation(netsim, netsim.areaWPhase, netsim.areaSPhase)
-                do.computePerm(netsim, netsim.capPresMin)
-                tPhaseImb.imbibition(netsim)
-                
+                assert freshStart
+                tDependency.initialize(netsim)
+                #tDependency.recomputeClusterVolume(netsim)
             except AssertionError:
                 pass
+            tDependency.simulateOstRip(netsim, freshStart=freshStart)
+            
+            #print('::::::::::::::::::::::::::::')
+            #from IPython import embed; embed()
+            netsim.filling = True
+            netsim.capPresMax = netsim.maxPc = netsim.aqAvgPres
+            netsim.fillTillNWDisconnected = False
+            netsim.minPc = netsim.Pc
+            SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
+            SecImbibition.initialize(netsim)
+            netsim._areaWP[:] = netsim.satList*netsim.areaSPhase
+            netsim._areaNWP[:] = (1-netsim.satList)*netsim.areaSPhase
+            arr = np.ones(netsim.totElements, dtype=bool)
+            newPc = netsim.clusterNW.pc[netsim.clusterNW_ID]
+            
+            tPhaseImb.__CondTPImbibition__(netsim, arr, newPc, True, True)
+            netsim.satW = do.Saturation(netsim, netsim.areaWPhase, netsim.areaSPhase)
+            do.computePerm(netsim, netsim.capPresMin)
+            tPhaseImb.imbibition(netsim)
+            
+        except AssertionError:
+            pass
                    
 
                    
-        else:
-            pass
+        
     except Exception as exc:
         print("\n\n Exception on processing: \n", exc, "Aborting!\n")
         return 1
