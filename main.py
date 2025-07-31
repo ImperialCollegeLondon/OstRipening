@@ -83,8 +83,6 @@ def main():
                             loaded_obj = dill.load(f)
                         #from IPython import embed; embed()
                         do.updateObj(netsim, loaded_obj)
-                        netsim.clusterW.restore_views(netsim)
-                        netsim.clusterNW.restore_views(netsim)
                         write_drainage_result(netsim)
                         
                         netsim.areaWPhase = netsim._areaWP.view()
