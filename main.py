@@ -42,11 +42,12 @@ def main():
         fillTillNWDisconnected = True
         timeDependent = True
         saveDrainage = True
-        saveImbibition = False
-        #timeDependent = False
+        saveImbibition = True
+        timeDependent = True
         skip_drainage_imbibition = False
-        skip_drainage = False
+        skip_drainage = True
         skip_imbibition = False
+        start_from_scratch = True
 
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
@@ -57,6 +58,7 @@ def main():
         else:
             from percolation_without_trapping import PDrainage, PImbibition, SecDrainage, SecImbibition
 
+  
         # two Phase simulations
         if not skip_drainage_imbibition and input_data.satControl():
             firstDrainCycle = True
@@ -64,6 +66,7 @@ def main():
             netsim.cycle = 0
             netsim.saveDrainage = saveDrainage
             netsim.saveImbibition = saveImbibition
+            netsim.timeDependent = timeDependent
             for j in range(len(input_data.satControl())):
                 netsim.finalSat, Pc, netsim.dSw, netsim.minDeltaPc,\
                  netsim.deltaPcFraction, netsim.calcKr, netsim.calcI,\
@@ -75,15 +78,14 @@ def main():
                 if netsim.finalSat < netsim.satW:
                     # Drainage process
                     if skip_drainage:
-                        print('11111111111111')
                         with open(os.path.join(f'./saved_simulation_{netsim.title}', 
                                                f"drainage_999999.pkl"), "rb") as f:
                             loaded_obj = dill.load(f)
-                            #netsim = dill.load(f)
-                        print('333333333333333333')
-                        do.updateObj(netsim, loaded_obj)
-                        print('2222222222222222')
                         #from IPython import embed; embed()
+                        do.updateObj(netsim, loaded_obj)
+                        netsim.clusterW.restore_views(netsim)
+                        netsim.clusterNW.restore_views(netsim)
+                        write_drainage_result(netsim)
                         
                         netsim.areaWPhase = netsim._areaWP.view()
                         netsim.areaNWPhase = netsim._areaNWP.view()
@@ -106,6 +108,16 @@ def main():
                             SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
                             SecDrainage.initialize(netsim)
                             
+                        # import cProfile
+                        # import pstats
+                        # profiler = cProfile.Profile()
+                        # profiler.enable()
+                        # tPhaseD.drainage(netsim)
+                        # profiler.disable()
+                        # stats = pstats.Stats(profiler).sort_stats('cumtime')
+                        # stats.print_stats()
+                        #from IPython import embed; embed()
+                        
                         tPhaseD.drainage(netsim)
                     firstDrainCycle = False
                         
@@ -117,6 +129,8 @@ def main():
                                                f"imbibition_1365_67.pkl"), "rb") as f:
                             loaded_obj = dill.load(f)
                         do.updateObj(netsim, loaded_obj)
+                        write_imbibition_result(netsim)
+                        
                     else:
                         netsim.is_oil_inj = False
                         netsim.minPc = Pc
@@ -139,54 +153,31 @@ def main():
                             SecImbibition.initialize(netsim)
                         
                         tPhaseImb.imbibition(netsim)
-                       
-                            
+                
+            
+        else:
+            with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                            f"imbibition_1219.pkl"), "rb") as f:
+                loaded_obj = dill.load(f)
+            do.updateObj(netsim, loaded_obj)
+            write_imbibition_result(netsim)
 
-        #timeDependent = False
+        if timeDependent:
+            if start_from_scratch:
+                TimeDependency(
+                    netsim, netsim.capPresMin, steps=40000, dt=0.054, 
+                    D=1.8e-9,
+                    #D=5e-9,
+                    H=6.9e-6,
+                    #H=1.2e-7,
+                    imposedP=1e6)
         
-        with open(os.path.join(f'./saved_simulation_{netsim.title}', 
-                                           f"imbibition_1365.pkl"), "rb") as f:
-            loaded_obj = dill.load(f)
-        do.updateObj(netsim, loaded_obj)
-        try:
-            assert timeDependent
-            TimeDependency(
-                netsim, netsim.capPresMin, steps=40000, dt=0.054, 
-                D=1.8e-9,
-                #D=5e-9,
-                H=6.9e-6,
-                #H=1.2e-7,
-                imposedP=1e6)
-            try:
-                assert freshStart
                 tDependency.initialize(netsim)
-                #tDependency.recomputeClusterVolume(netsim)
-            except AssertionError:
-                pass
-            tDependency.simulateOstRip(netsim, freshStart=freshStart)
+               
+            tDependency.simulateOstRip(netsim, freshStart=start_from_scratch)
             
-            #print('::::::::::::::::::::::::::::')
-            #from IPython import embed; embed()
-            netsim.filling = True
-            netsim.capPresMax = netsim.maxPc = netsim.aqAvgPres
-            netsim.fillTillNWDisconnected = False
-            netsim.minPc = netsim.Pc
-            SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
-            SecImbibition.initialize(netsim)
-            netsim._areaWP[:] = netsim.satList*netsim.areaSPhase
-            netsim._areaNWP[:] = (1-netsim.satList)*netsim.areaSPhase
-            arr = np.ones(netsim.totElements, dtype=bool)
-            newPc = netsim.clusterNW.pc[netsim.clusterNW_ID]
-            
-            tPhaseImb.__CondTPImbibition__(netsim, arr, newPc, True, True)
-            netsim.satW = do.Saturation(netsim, netsim.areaWPhase, netsim.areaSPhase)
-            do.computePerm(netsim, netsim.capPresMin)
-            tPhaseImb.imbibition(netsim)
-            
-        except AssertionError:
-            pass
-                   
-
+        print("\n\n Simulation finished successfully!\n")
+        from IPython import embed; embed()
                    
         
     except Exception as exc:
@@ -200,7 +191,22 @@ def main():
     return 0
 
 
+def write_drainage_result(self):
+    print('----------------------------------------------------------------------------------')
+    print('---------------------------------Two Phase Drainage Cycle {}---------------------'.format(self.cycle))
+    print('Sw: %10.6g  \tqW: %8.6e  \tkrw: %12.6g  \tqNW: %8.6e  \tkrnw:\
+    %12.6g  \tPc: %8.6g\t %8.0f invasions' % (
+    self.satW, self.qW, self.krw, self.qNW, self.krnw, self.capPresMax, self.totNumFill, ))
+    print('\n\n')
 
+
+def write_imbibition_result(self):
+    print('----------------------------------------------------------------------------------')
+    print('---------------------------------Two Phase Imbibition Cycle {}---------------------'.format(self.cycle))
+    print('Sw: %10.6g  \tqW: %8.6e  \tkrw: %12.6g  \tqNW: %8.6e  \tkrnw:\
+    %12.6g  \tPc: %8.6g\t %8.0f invasions' % (
+    self.satW, self.qW, self.krw, self.qNW, self.krnw, self.capPresMin, self.totNumFill, ))
+    print('\n\n')
 
 
 if __name__ == "__main__":
