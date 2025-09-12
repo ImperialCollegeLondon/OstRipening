@@ -4,6 +4,7 @@ import os
 import pandas as pd
 
 sys.path.append("./pnflowPy")
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pnflowPy.inputData import InputData
 from pnflowPy.network import Network
 from pnflowPy.sPhase import SinglePhase
@@ -37,7 +38,17 @@ def main():
         writeTrappedData = False
         fillTillNWDisconnected = True
         timeDependent = True
+<<<<<<< Updated upstream
         #timeDependent = False
+=======
+        saveDrainage = True
+        saveImbibition = True
+        timeDependent = True
+        skip_drainage_imbibition = True
+        skip_drainage = False
+        skip_imbibition = False
+        start_from_scratch = True
+>>>>>>> Stashed changes
 
         if timeDependent:
             from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
@@ -78,9 +89,82 @@ def main():
                         netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
                         firstDrainCycle = False
                     else:
+<<<<<<< Updated upstream
                         netsim = SecDrainage(netsim, writeData=writeData, 
                                              writeTrappedData=writeTrappedData)
                     netsim.drainage()
+=======
+                        netsim.is_oil_inj = True
+                        netsim.maxPc = Pc
+                        if firstDrainCycle:
+                            (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
+                                netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng('INIT_CONT_ANG')
+                            PDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            tPhaseD.initialize(netsim)
+                            netsim.prop_drainage = {}
+                            netsim.prop_drainage['contactAng'] = netsim.contactAng.copy()
+                            netsim.prop_drainage['thetaRecAng'] = netsim.thetaRecAng.copy()
+                            netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                        else:
+                            SecDrainage(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            SecDrainage.initialize(netsim)
+                            
+                        # import cProfile
+                        # import pstats
+                        # profiler = cProfile.Profile()
+                        # profiler.enable()
+                        # tPhaseD.drainage(netsim)
+                        # profiler.disable()
+                        # stats = pstats.Stats(profiler).sort_stats('cumtime')
+                        # stats.print_stats()
+                        #from IPython import embed; embed()
+                        
+                        tPhaseD.drainage(netsim)
+
+                    netsim.maxCenterArea = netsim.areaNWPhase.copy()
+                    firstDrainCycle = False
+                        
+                        
+                else:
+                    # Imbibition process
+                    if skip_imbibition:
+                        with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                               f"imbibition_1219.pkl"), "rb") as f:
+                            loaded_obj = dill.load(f)
+                        do.updateObj(netsim, loaded_obj)
+                        write_imbibition_result(netsim)
+                        
+                    else:
+                        netsim.is_oil_inj = False
+                        netsim.minPc = Pc
+                        netsim.fillTillNWDisconnected = fillTillNWDisconnected
+                        
+                        if firstImbCycle:
+                            (netsim.wettClass, netsim.minthetai, netsim.maxthetai, netsim.delta,
+                                netsim.eta, netsim.distModel, netsim.sepAng) = input_data.initConAng(
+                                    'EQUIL_CON_ANG')
+                                    
+                            PImbibition(netsim, writeData=writeData, writeTrappedData=writeTrappedData)
+                            tPhaseImb.initialize(netsim)
+                            netsim.prop_imbibition = {}
+                            netsim.prop_imbibition['contactAng'] = netsim.contactAng.copy()
+                            netsim.prop_imbibition['thetaRecAng'] = netsim.thetaRecAng.copy()
+                            netsim.prop_imbibition['thetaAdvAng'] = netsim.thetaAdvAng.copy()
+                            firstImbCycle = False
+                        else:
+                            SecImbibition(netsim, writeData=writeData,writeTrappedData=writeTrappedData)
+                            SecImbibition.initialize(netsim)
+                        
+                        tPhaseImb.imbibition(netsim)
+                
+            
+        else:
+            with open(os.path.join(f'./saved_simulation_{netsim.title}', 
+                                            f"imbibition_1219.pkl"), "rb") as f:
+                loaded_obj = dill.load(f)
+            do.updateObj(netsim, loaded_obj)
+            write_imbibition_result(netsim)
+>>>>>>> Stashed changes
 
                 except AssertionError:
                     # Imbibition process
