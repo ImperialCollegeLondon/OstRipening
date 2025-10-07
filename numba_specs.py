@@ -12,6 +12,7 @@ updateToDrainImbibe_spec = void(
     float64[:],      # pcMaxArray
     float64[:],      # PcI
     float64[:],      # PcD
+    float64[:],      # volarray
     int32,           # totElements
     boolean[:],      # tempMemArray
     boolean,         # parallel
@@ -97,7 +98,7 @@ computeVolume_spec = float64[:](
     float64[:],        # thetaAdvAng
     float64[:],        # thetaRecAng
     float64[:],        # PcD (capillary pressure for drainage)
-    float64[:],        # criticalVolume
+    #float64[:],        # criticalVolume
     float64[:],        # tempClustVol
     float64[:],        # tempMemVol
     float64[:],        # satList
@@ -274,6 +275,8 @@ findPc_spec = void(
     int32[:],        # clusterW_ID
     int32[:],        # clusterNW_ID
     float64[:],      # clusterVolume
+    float64[:],      # pcShrink
+    float64[:],      # pcMax
     float64[:],      # areaSPhase
     float64[:],      # maxCornerArea
     float64[:],      # volarray
@@ -281,14 +284,63 @@ findPc_spec = void(
     float64[:],      # thetaAdvAng
     float64[:],      # thetaRecAng
     float64[:],      # PcD
-    float64[:],      # criticalVolume
     float64[:],      # satList
     float64[:],      # tempClustVol
     float64[:],      # tempMemVol
     float64,         # _delta
     boolean[:],      # isSquare
     boolean[:],      # isTriangle
-    float64[:],      # totalVolume
+    float64[:],      # cornA
+    float64,         # muw
+    float64,         # MOLECULAR_LENGTH
+    float64,         # imposedP
+    float64,         # RT
+    float64,         # H
+    float64,         # moles_tol
+    float64,         # pc_tol
+    int32,           # max_iter
+    boolean[:],      # notdone
+    float64[:],      # pc1
+    float64[:],      # pc2
+    float64[:]       # pcNext
+)
+
+findPcVolume_spec = void(
+    int32[:],          # keys
+    int32[:],          # memkeys
+    int32[:],          # memID
+    float64[:],        # targetMoles
+    float64[:, :],     # m_halfAngles
+    boolean[:, :],     # m_cornExists
+    float64[:, :],     # m_initOrMaxPcHist
+    float64[:, :],     # m_initOrMinApexDistHist
+    float64[:, :],     # m_advPc
+    float64[:, :],     # m_recPc
+    float64[:, :],     # m_initedApexDist
+    boolean[:],      # trappedW
+    boolean[:],      # trappedNW
+    float64[:],      # clusterW_pc
+    float64[:],      # clusterNW_pc
+    int32[:],        # clusterW_ID
+    int32[:],        # clusterNW_ID
+    float64[:],      # clusterVolume
+    float64[:],      # pcShrink
+    float64[:],      # pcMax
+    float64[:],      # areaSPhase
+    float64[:],      # maxCornerArea
+    float64[:],      # volarray
+    float64,         # sigma
+    float64[:],      # thetaAdvAng
+    float64[:],      # thetaRecAng
+    float64[:],      # PcD
+    # float64[:],    # criticalVolume
+    float64[:],      # satList
+    float64[:],      # tempClustVol
+    float64[:],      # tempMemVol
+    float64,         # _delta
+    boolean[:],      # isSquare
+    boolean[:],      # isTriangle
+    # float64[:],      # totalVolume
     float64[:],      # cornA
     float64,         # muw
     float64,         # MOLECULAR_LENGTH
@@ -515,4 +567,43 @@ mapOldNewKeys_spec = Tuple((int32[:], int32[:]))(
     int32[:],       # oldkeys
     int32[:],       # newkeys
     boolean[:]      # notdone
+)
+
+
+returnVolMoles_spec = Tuple((float64[:], float64[:]))(
+    int32[:],          # keys
+    int32[:],          # memkeys
+    int32[:],          # memID
+    float64[:],        # pc
+    float64[:, :],     # m_halfAngles
+    boolean[:, :],     # m_cornExists
+    float64[:, :],     # m_initOrMaxPcHist
+    float64[:, :],     # m_initOrMinApexDistHist
+    float64[:, :],     # m_advPc
+    float64[:, :],     # m_recPc
+    float64[:, :],     # m_initedApexDist
+    boolean[:],        # trappedW
+    boolean[:],        # trappedNW
+    float64[:],        # clusterW_pc
+    float64[:],        # clusterNW_pc
+    int32[:],          # clusterW_ID
+    int32[:],          # clusterNW_ID
+    float64[:],        # areaSPhase
+    float64[:],        # maxCornerArea
+    float64[:],        # volarray
+    float64,           # sigma
+    float64[:],        # thetaAdvAng
+    float64[:],        # thetaRecAng
+    float64[:],        # PcD
+    float64[:],        # satList
+    float64[:],        # tempClustVol
+    float64[:],        # tempMemVol
+    float64,           # _delta
+    boolean[:],        # isSquare
+    boolean[:],        # isTriangle
+    float64[:],        # cornA
+    float64,           # muw
+    float64,           # MOLECULAR_LENGTH
+    float64,           # imposedP
+    float64            # RT
 )

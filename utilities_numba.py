@@ -9,7 +9,7 @@ import cluster as doClust
 
 @njit(updateToDrainImbibe_spec, parallel=True, cache=True)
 def updateToDrainImbibe_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-	pcShrinkArray, pcMaxArray, PcI, PcD, totElements, tempMemArray, parallel, pc_min, pc_max):
+	pcShrinkArray, pcMaxArray, PcI, PcD, Rarray, totElements, tempMemArray, parallel, pc_min, pc_max):
     ''' updates the toDrain and toImbibe arrays'''
 
     def _func(i):
@@ -22,14 +22,16 @@ def updateToDrainImbibe_numba(arrkeys, members, neighbours, toDrainArray, toImbi
         
         tempMemArray[mem] = True
         if mem.size==1:
-            pcShrinkArray[k] = PcI[mem[0]]
+            pcShrinkArray[k] = max(PcI[mem[0]], 1e-3)
             toImbibeArray[k] = mem[0]
         else:
-            imb = mem[np.argmax(PcI[mem])]
+            imb = mem[np.argmin(Rarray[mem])]
+            #imb = mem[np.argmax(PcI[mem])]
             toImbibeArray[k] = imb
-            pcShrinkArray[k] = PcI[imb]
-            if pcShrinkArray[k] < 0.0:
-                pcShrinkArray[k] = PcI[imb]
+            if k==0: pcShrinkArray[k] = 1e-3
+            else:
+                #pcShrinkArray[k] = max(max(PcI[imb], PcI[mem].max()), 1e-3)
+                pcShrinkArray[k] = max(PcI[imb], 1e-3)
                           
         neigh = np.where(neighbours[k])[0]
         if neigh.size==0:
@@ -48,6 +50,40 @@ def updateToDrainImbibe_numba(arrkeys, members, neighbours, toDrainArray, toImbi
     else:
         for i in prange(n):
             _func(i)
+
+
+@njit(parallel=True, cache=True)
+def zeroInvalidFlux(flux, aqueousMoles, minMoles, TPValid, TValid, nValid, moles_tol):
+    for i in prange(nValid):
+        mask = (flux[i]>0.0)
+        pt = TPValid[i]*mask + TValid[i]*(1-mask)
+        mask = (aqueousMoles[pt]-minMoles[pt]>=moles_tol)
+        flux[i] *= mask
+
+
+@njit(cache=True)
+def updateFluxes(flux, netFlux, netFluxClusters, TPValid, TValid, toUpdateNW, clusterID, nValid, D, len_tij_valid, gasConc0):
+    netFlux[:] = 0.0
+    netFluxClusters[:] = 0.0
+    for i in range(nValid):
+        p, t = TPValid[i], TValid[i]
+        flux[i] = D*len_tij_valid[i]*(gasConc0[p] - gasConc0[t])
+        netFlux[t] += flux[i]
+        netFlux[p] -= flux[i]
+        if toUpdateNW[t]:
+            netFluxClusters[clusterID[t]] += flux[i]
+        if toUpdateNW[p]:
+            netFluxClusters[clusterID[p]] -= flux[i]
+
+
+@njit(parallel=True, cache=True)
+def compFlux(flux, TPValid, TValid, len_tij_valid, gasConc, D, nValid, aqueousMoles, minMoles, moles_tol):
+    for i in prange(nValid):
+        p, t = TPValid[i], TValid[i]
+        fl = D*len_tij_valid[i]*(gasConc[p] - gasConc[t])
+        mask = (fl>0.0 and (aqueousMoles[p]-minMoles[p] >= moles_tol)) or (
+            fl<0.0 and (aqueousMoles[t]-minMoles[t] >= moles_tol))
+        flux[i] = fl*mask
 
 
 @njit(fastmath=True, cache=True, parallel=True)
@@ -174,33 +210,15 @@ def computeCornerArea_numba1(arr, newPc, clusterID, cornA, m_halfAngles, sinHalf
 def computeVolume_numba(keys, memkeys, memID, newPc, cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
     m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, 
     clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, 
-    criticalVolume, tempClustVol, tempMemVol, satList, _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, 
+    tempClustVol, tempMemVol, satList, _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, 
     overidetrapping, updateSat):
-    #print('Im in computeVolume_numba!!!')
-    #from IPython import embed; embed()
-
+    
     nElem = memID.size
-    # cond = np.zeros(nElem, dtype=np.bool_)
-    # for i in range(nElem):
-    #     e, k = memID[i], memkeys[i]
-    #     if newPc[k] <= PcD[e]:
-    #         tempMemVol[e] = newPc[k]/PcD[e]*criticalVolume[e]
-    #     else:
-    #         cond[i] = True
-    # memID_left = memID[cond]
-
-
-
-    cond = (newPc[memID] <= PcD[memID])
-    memID_free = memID[cond]
-    tempMemVol[memID_free] = newPc[memID_free]/PcD[memID_free]*criticalVolume[memID_free]
-    memID_left = memID[~cond]
-    #memID_left = memID
-    computeCornerArea_numba(memID_left, newPc[clusterNW_ID], cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
+    computeCornerArea_numba(memID, newPc[clusterNW_ID], cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
         m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, 
         clusterNW_pc, clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, sigma, thetaAdvAng, thetaRecAng, 
         _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, overidetrapping)
-    tempMemVol[memID_left] = (1-cornA[memID_left]/areaSPhase[memID_left])*volarray[memID_left]
+    tempMemVol[memID] = (1-cornA[memID]/areaSPhase[memID])*volarray[memID]
 
     if updateSat:
         satList[memID] = 1 - tempMemVol[memID]/volarray[memID]
@@ -263,151 +281,166 @@ def computeVolume_single_numba(memID, newPc, cornA, m_halfAngles, m_cornExists, 
     return tempMemVol[memID].sum()
 
 
-@njit(updateVolumeShrinkMax_spec, cache=True)
-def updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
-        PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max):
-    tempMemArray.fill(False)
-    updateToDrainImbibe_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, PcI, PcD, totElements, tempMemArray, parallel, pc_min, pc_max)
-    valClust[arrkeys] = (clustSize[arrkeys]>0)
-    valClustD[arrkeys] = valClust[arrkeys] & (toDrainArray[arrkeys] <= totElements)
+# @njit(updateVolumeShrinkMax_spec, cache=True)
+# def updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
+#         PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max):
+#     tempMemArray.fill(False)
+#     updateToDrainImbibe_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, PcI, PcD, totElements, tempMemArray, parallel, pc_min, pc_max)
+#     valClust[arrkeys] = (clustSize[arrkeys]>0)
+#     valClustD[arrkeys] = valClust[arrkeys] & (toDrainArray[arrkeys] <= totElements)
 
-    mem = tempMemArray & valClustD[clusterID]
-    nwID = np.flatnonzero(mem)
-    volMaxArray[arrkeys] = np.bincount(clusterID[nwID], maxGasVolume[nwID], arrkeys.max()+1)[arrkeys]
+#     mem = tempMemArray & valClustD[clusterID]
+#     nwID = np.flatnonzero(mem)
+#     volMaxArray[arrkeys] = np.bincount(clusterID[nwID], maxGasVolume[nwID], arrkeys.max()+1)[arrkeys]
 
-    mem[toImbibeArray[arrkeys]] = False
-    nwID = np.flatnonzero(mem)
-    volShrinkArray[arrkeys] = np.maximum(
-        1.0e-30, np.bincount(clusterID[nwID], criticalVolume[nwID], arrkeys.max()+1)[arrkeys])
-
-
-@njit(updateMolesShrinkGrowth_spec, cache=True)
-def updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
-    molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H):
-    molesMaxArray[arrkeys] = ((imposedP+pcMaxArray[arrkeys])*volMaxArray[arrkeys]/RT + 
-                    H*pcMaxArray[arrkeys]*(totalVolume[arrkeys]-volMaxArray[arrkeys]))
-    totalVolume_k = totalVolume[arrkeys] - volarray[toImbibeArray[arrkeys]]
-    molesShrinkArray[arrkeys] = np.maximum(
-            (imposedP + pcShrinkArray[arrkeys])*volShrinkArray[arrkeys]/RT +
-            H*pcShrinkArray[arrkeys]*(totalVolume_k-volShrinkArray[arrkeys]), 1e-22)
+#     mem[toImbibeArray[arrkeys]] = False
+#     nwID = np.flatnonzero(mem)
+#     volShrinkArray[arrkeys] = np.maximum(
+#         1.0e-30, np.bincount(clusterID[nwID], criticalVolume[nwID], arrkeys.max()+1)[arrkeys])
 
 
-@njit(updateEventsThreshold_spec, cache=True)
-def updateEventsThreshold_shrinkage_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
-        molesShrinkArray, molesMaxArray, molesArray, totalVolume, volarray, PcI, PcD, maxGasVolume, 
-        criticalVolume, totElements, imposedP, RT, H, tempMemArray, parallel, pc_min, pc_max):
-
-    oldToImbibe = toImbibeArray[arrkeys]
-    updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
-        PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max)
-
-    keys1 = arrkeys[(oldToImbibe==toDrainArray[arrkeys])]
-    oldMolesShrink = molesShrinkArray[keys1]
-    updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
-        molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H)
-    molesMaxArray[keys1] = np.maximum(molesMaxArray[keys1], oldMolesShrink+1e-22)
-    molesShrinkArray[arrkeys] = np.maximum(np.minimum(molesShrinkArray[arrkeys], molesArray[arrkeys]-1e-22), 1e-22)
+# @njit(updateMolesShrinkGrowth_spec, cache=True)
+# def updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
+#     molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H):
+#     molesMaxArray[arrkeys] = ((imposedP+pcMaxArray[arrkeys])*volMaxArray[arrkeys]/RT + 
+#                     H*pcMaxArray[arrkeys]*(totalVolume[arrkeys]-volMaxArray[arrkeys]))
+#     totalVolume_k = totalVolume[arrkeys] - volarray[toImbibeArray[arrkeys]]
+#     molesShrinkArray[arrkeys] = np.maximum(
+#             (imposedP + pcShrinkArray[arrkeys])*volShrinkArray[arrkeys]/RT +
+#             H*pcShrinkArray[arrkeys]*(totalVolume_k-volShrinkArray[arrkeys]), 1e-22)
 
 
-@njit(updateEventsThreshold_spec, cache=True)
-def updateEventsThreshold_growth_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
-        molesShrinkArray, molesMaxArray, molesArray, totalVolume, volarray, PcI, PcD, maxGasVolume, 
-        criticalVolume, totElements, imposedP, RT, H, tempMemArray, parallel, pc_min, pc_max):
+# @njit(updateEventsThreshold_spec, cache=True)
+# def updateEventsThreshold_shrinkage_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
+#         molesShrinkArray, molesMaxArray, molesArray, totalVolume, volarray, PcI, PcD, maxGasVolume, 
+#         criticalVolume, totElements, imposedP, RT, H, tempMemArray, parallel, pc_min, pc_max):
 
-    oldToDrain = toDrainArray[arrkeys]
-    updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
-        pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
-        PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max)
+#     oldToImbibe = toImbibeArray[arrkeys]
+#     updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
+#         PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max)
 
-    keys1 = arrkeys[(oldToDrain==toImbibeArray[arrkeys])]
-    oldMolesMax = molesMaxArray[keys1]
-    updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
-        molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H)
-    molesMaxArray[keys1] = np.maximum(molesMaxArray[keys1], oldMolesMax+1e-22)
-    molesShrinkArray[keys1] = np.maximum(np.minimum(molesShrinkArray[keys1], oldMolesMax-1e-22), 1e-22)
+#     keys1 = arrkeys[(oldToImbibe==toDrainArray[arrkeys])]
+#     oldMolesShrink = molesShrinkArray[keys1]
+#     updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
+#         molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H)
+#     molesMaxArray[keys1] = np.maximum(molesMaxArray[keys1], oldMolesShrink+1e-22)
+#     molesShrinkArray[arrkeys] = np.maximum(np.minimum(molesShrinkArray[arrkeys], molesArray[arrkeys]-1e-22), 1e-22)
+
+
+# @njit(updateEventsThreshold_spec, cache=True)
+# def updateEventsThreshold_growth_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
+#         molesShrinkArray, molesMaxArray, molesArray, totalVolume, volarray, PcI, PcD, maxGasVolume, 
+#         criticalVolume, totElements, imposedP, RT, H, tempMemArray, parallel, pc_min, pc_max):
+
+#     oldToDrain = toDrainArray[arrkeys]
+#     updateVolumeShrinkMax_numba(arrkeys, members, neighbours, toDrainArray, toImbibeArray, 
+#         pcShrinkArray, pcMaxArray, valClust, valClustD, clustSize, clusterID, volShrinkArray, volMaxArray,
+#         PcI, PcD, maxGasVolume, criticalVolume, totElements, tempMemArray, parallel, pc_min, pc_max)
+
+#     keys1 = arrkeys[(oldToDrain==toImbibeArray[arrkeys])]
+#     oldMolesMax = molesMaxArray[keys1]
+#     updateMolesShrinkGrowth_numba(arrkeys, pcMaxArray, pcShrinkArray, volMaxArray, volShrinkArray, 
+#         molesShrinkArray, molesMaxArray, toImbibeArray, totalVolume, volarray, imposedP, RT, H)
+#     molesMaxArray[keys1] = np.maximum(molesMaxArray[keys1], oldMolesMax+1e-22)
+#     molesShrinkArray[keys1] = np.maximum(np.minimum(molesShrinkArray[keys1], oldMolesMax-1e-22), 1e-22)
+
+
+@njit(returnVolMoles_spec, cache=True, fastmath=True)
+def returnVolMoles(keys, memkeys, memID, pc, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
+    m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, 
+    clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, 
+    volarray, sigma, thetaAdvAng, thetaRecAng, PcD, satList, tempClustVol, tempMemVol, 
+    _delta, isSquare, isTriangle, cornA, muw, MOLECULAR_LENGTH, imposedP, RT):
+    vol = computeVolume_numba(keys, memkeys, memID, pc, cornA, m_halfAngles,
+        m_cornExists, m_initOrMaxPcHist, m_initOrMinApexDistHist, m_advPc, m_recPc, 
+        m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, 
+        clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, volarray, 
+        sigma, thetaAdvAng, thetaRecAng, PcD, tempClustVol, tempMemVol, 
+        satList, _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, True, False)
+    moles = (imposedP+pc[keys])*vol/RT
+
+    return vol, moles
 
 
 @njit(findPc_spec, cache=True, fastmath=True, parallel=True)
-def findPc(keys, memkeys, memID, targetMoles, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
+def findPcVolume(keys, memkeys, memID, targetMoles, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
     m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, 
-    clusterW_ID, clusterNW_ID, clusterVolume, areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng,
-    PcD, criticalVolume, satList, tempClustVol, tempMemVol, _delta, isSquare, isTriangle, totalVolume, cornA, muw, 
-    MOLECULAR_LENGTH, imposedP, RT, H, moles_tol, pc_tol, max_iter, notdone, pc1, pc2, pcNext, eps):
+    clusterW_ID, clusterNW_ID, clusterVolume, pcShrink, pcMax, areaSPhase, maxCornerArea, volarray, sigma, 
+    thetaAdvAng, thetaRecAng, PcD, satList, tempClustVol, tempMemVol, _delta, isSquare, isTriangle, cornA, muw, 
+    MOLECULAR_LENGTH, imposedP, RT, H, moles_tol, pc_tol, max_iter, notdone, pc1, pc2, pcNext):
 
     pc1[keys] = clusterNW_pc[keys]
-    vol1 = computeVolume_numba(keys, memkeys, memID, pc1, cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
-        m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, 
-        clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, 
-        criticalVolume, tempClustVol, tempMemVol, satList, _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, True, False)
-
-    nkeys = keys.size
-    # cond = np.ones(memkeys.size, dtype=np.bool_)
-    # f_1 = np.empty(nkeys)
-    # for i in range(nkeys):
-    #     k = keys[i]
-    #     f_1[i] = (imposedP+pc1[k])*vol1[i]/RT + H*pc1[k]*(totalVolume[k]-vol1[i]) - targetMoles[k]
-    #     notdone[k] = (abs(f_1[i]) > moles_tol)
-    #     if notdone[k]:
-    #         pc2[k] = 1.1*pc1[k]
-    #     else:
-    #         clusterVolume[k] = vol1[i]
-    #         cond[i] = False
-    
-    moles1 = ((imposedP+pc1[keys])*vol1/RT + H*pc1[keys]*(totalVolume[keys]-vol1))
+    vol1, moles1 = returnVolMoles(keys, memkeys, memID, pc1, m_halfAngles, m_cornExists, 
+        m_initOrMaxPcHist, m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, 
+        trappedW, trappedNW, clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, 
+        areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, satList, 
+        tempClustVol, tempMemVol, _delta, isSquare, isTriangle, cornA, muw, MOLECULAR_LENGTH, 
+        imposedP, RT)
     f_1 = moles1 - targetMoles[keys]
-    notdone[keys] = (np.abs(f_1) > moles_tol)
-    done = ~notdone[keys]
-    clusterVolume[keys[done]] = vol1[done]
-    keys_notdone = keys[notdone[keys]]
-    pc2[keys_notdone] = 1.1*pc1[keys_notdone]
-    
-    # nkeys = keys.size
-    cond = notdone[memkeys]
-    if not cond.all():
+
+    notdone_keys = (np.abs(f_1) > moles_tol)
+    pc2[keys] = pc1[keys]
+    keys_notdone = keys[notdone_keys]
+    pc2[keys_notdone] = (pcMax[keys_notdone]+1e-3)*(f_1[notdone_keys]<0)+(
+        np.maximum(pcShrink[keys_notdone]-1e-3, 1e-3)*(f_1[notdone_keys]>0))
+    vol2, moles2 = returnVolMoles(keys, memkeys, memID, pc2, m_halfAngles, m_cornExists, 
+        m_initOrMaxPcHist, m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, 
+        trappedW, trappedNW, clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, 
+        areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, satList, 
+        tempClustVol, tempMemVol, _delta, isSquare, isTriangle, cornA, muw, MOLECULAR_LENGTH, 
+        imposedP, RT)
+    f_2 = moles2 - targetMoles[keys]
+
+    notdone_keys &= (f_1*f_2<0)
+    notdone[keys] = notdone_keys
+    keys_notdone = keys[notdone_keys]
+    done = (~notdone_keys)
+    if done.any():
+        keys_done = keys[done]
+        clusterNW_pc[keys_done] = pc2[keys_done]
+        clusterVolume[keys_done] = vol2[done]
+        cond = notdone[memkeys]
+        memID_done = memID[~cond]
+        satList[memID_done] = cornA[memID_done]/areaSPhase[memID_done]
         memkeys = memkeys[cond]
         memID = memID[cond]
+        pcNext[keys_done] = pc2[keys_done]
     
     for _ in range(max_iter):
-        vol2 = computeVolume_numba(keys, memkeys, memID, pc2, cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
-            m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc,
-            clusterW_ID, clusterNW_ID, areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng,
-            PcD, criticalVolume, tempClustVol, tempMemVol, satList, _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, True, False)
-        
-        for i in prange(nkeys):
-            k = keys[i]
-            if not notdone[k]: continue
-            moles_k = ((imposedP + pc2[k])*vol2[i]/RT + H*pc2[k]*(totalVolume[k]-vol2[i]))
-            f_2_i = moles_k - targetMoles[k]
-            if (abs(f_2_i) <= moles_tol) or (np.abs(pc2[k]-pc1[k])<=pc_tol):
-                notdone[k] = False
-                clusterNW_pc[k] = pc2[k]
-                clusterVolume[k] = vol2[i]                
-            else:
-                denom_i = f_2_i - f_1[i]
-                if abs(denom_i) < eps:
-                    denom_i = eps if denom_i >= 0.0 else -eps
-                delta_k = f_2_i * (pc2[k] - pc1[k]) / denom_i
-                pcNext[k] = pc2[k] - max(-0.5*pc2[k], min(delta_k, 0.5*pc2[k]))
-                pc1[k], f_1[i] = pc2[k], f_2_i
-                pc2[k] = pcNext[k]
+        pcNext[keys_notdone] = (pc1[keys_notdone]+pc2[keys_notdone])/2
+        vol2[notdone_keys], moles2[notdone_keys] = returnVolMoles(
+            keys_notdone, memkeys, memID, pcNext, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
+            m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, 
+            trappedW, trappedNW, clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, 
+            areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, satList, 
+            tempClustVol, tempMemVol, _delta, isSquare, isTriangle, cornA, muw, MOLECULAR_LENGTH, 
+            imposedP, RT)
+        f_Next = moles2 - targetMoles[keys]
 
-        if not notdone[keys].any():
-            break
-
+        cond = notdone_keys & (f_1*f_Next>0)
+        pc1[keys_notdone] = np.where(cond[notdone_keys], pcNext[keys_notdone], pc1[keys_notdone])
+        pc2[keys_notdone] = np.where(cond[notdone_keys], pc2[keys_notdone], pcNext[keys_notdone])
+    
+        notdone[keys_notdone] = ((np.abs(f_2[notdone_keys]) > moles_tol)&
+            (np.abs(pc1[keys_notdone]-pc2[keys_notdone])>pc_tol))
+        notdone_keys = notdone[keys]
+        keys_notdone = keys[notdone_keys]
+        if not keys_notdone.any(): break
         cond = notdone[memkeys]
+        memID_done = memID[~cond]
+        satList[memID_done] = cornA[memID_done]/areaSPhase[memID_done]
         memkeys = memkeys[cond]
         memID = memID[cond]
-        
-    cond = notdone[keys]
-    keys_left = keys[cond]
-    clusterNW_pc[keys_left] = pc2[keys_left]
-    clusterVolume[keys_left] = vol2[cond]
-    
+
+    keys_left = keys[~done]
+    clusterNW_pc[keys_left] = pcNext[keys_left]
+    clusterVolume[keys_left] = vol2[~done]
+
     return
 
 
@@ -516,20 +549,22 @@ def findPc1(keys, memkeys, memID, targetMoles, m_halfAngles, sinHalfAng, sinHalf
 #     return
 
 
-@njit(updateClusterPcVolume_spec, cache=True, fastmath=True)
-def updateClusterPcVolume_numba(memID, keys, targetMoles, cornA, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
-    m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, 
-    clusterVolume, clusterW_ID, clusterNW_ID, totalVolume, areaSPhase, maxCornerArea, volarray, sigma, 
-    thetaAdvAng, thetaRecAng, PcD, criticalVolume, satList, tempClustVol, tempMemVol, _delta, isSquare, isTriangle, 
-    muw, MOLECULAR_LENGTH, imposedP, RT, H, moles_tol, pc_tol, max_iter, notdone, pc1, pc2, pcNext, eps):
+# @njit(updateClusterPcVolume_spec, cache=True, fastmath=True)
+# def updateClusterPcVolume_numba(memID, keys, targetMoles, cornA, m_halfAngles, m_cornExists,
+#     m_initOrMaxPcHist, m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, 
+#     clusterW_pc, clusterNW_pc, clusterVolume, clusterW_ID, clusterNW_ID, totalVolume, areaSPhase, maxCornerArea, 
+#     volarray, sigma, thetaAdvAng, thetaRecAng, PcD, criticalVolume, satList, tempClustVol, tempMemVol, 
+#     _delta, isSquare, isTriangle, muw, MOLECULAR_LENGTH, imposedP, RT, H, moles_tol, pc_tol, max_iter, 
+#     notdone, pc1, pc2, pcNext, eps):
 
-    ''' update the cluster pc and volume according to the moles in each cluster '''
-    memkeys = clusterNW_ID[memID]
-    findPc(keys, memkeys, memID, targetMoles, m_halfAngles, m_cornExists, m_initOrMaxPcHist, m_initOrMinApexDistHist, 
-        m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, 
-        clusterVolume, areaSPhase, maxCornerArea, volarray, sigma, thetaAdvAng, thetaRecAng, PcD, criticalVolume, 
-        satList, tempClustVol, tempMemVol, _delta, isSquare, isTriangle, totalVolume, cornA, muw, 
-        MOLECULAR_LENGTH, imposedP, RT, H, moles_tol, pc_tol, max_iter, notdone, pc1, pc2, pcNext, eps)
+#     ''' update the cluster pc and volume according to the moles in each cluster '''
+#     memkeys = clusterNW_ID[memID]
+#     findPc(keys, memkeys, memID, targetMoles, m_halfAngles, m_cornExists, m_initOrMaxPcHist, 
+#         m_initOrMinApexDistHist, m_advPc, m_recPc, m_initedApexDist, trappedW, trappedNW, 
+#         clusterW_pc, clusterNW_pc, clusterW_ID, clusterNW_ID, clusterVolume, areaSPhase, maxCornerArea, 
+#         volarray, sigma, thetaAdvAng, thetaRecAng, PcD, criticalVolume, atList, tempClustVol, tempMemVol, 
+#         _delta, isSquare, isTriangle, totalVolume, cornA, muw, MOLECULAR_LENGTH, imposedP, RT, H, 
+#         moles_tol, pc_tol, max_iter, notdone, pc1, pc2, pcNext, eps)
 
 
 @njit(updateClusterPcVolume1_spec, cache=True, fastmath=True)

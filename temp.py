@@ -38,7 +38,7 @@ class TempArrays(BaseTempArrays):
 		cls.resMolesL = np.concatenate((cls.resMolesL, np.zeros(size)))
 		cls.resMolesH = np.concatenate((cls.resMolesH, np.zeros(size)))
 		cls.resCond = np.concatenate((cls.resCond,   np.zeros(size, dtype=np.bool_)))
-
+	
 	@classmethod
 	def formTempNetworkArrays(cls, nPores, nThroats, totElements, conn_graph_size, halfAng):
 		BaseTempArrays.formTempNetworkArrays(nPores, totElements, conn_graph_size)
@@ -55,3 +55,4 @@ class TempArrays(BaseTempArrays):
 		cls.m_sinHalfAng = np.sin(halfAng)
 		cls.m_cosHalfAng = np.cos(halfAng)
 		cls.m_sinHalfAngcosHalfAng = cls.m_sinHalfAng*cls.m_cosHalfAng
+		cls.tempID = np.full(totElements, -5, dtype=np.int32)
