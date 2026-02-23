@@ -19,7 +19,7 @@ There are a few extra libraries to install:
 Quick installation can be achieved by replicating the environment in Anaconda:
   1. Clone the repo
      ```python
-     git clone https://github.com/ImperialCollegeLondon/pnflowPy.git
+     git clone https://github.com/ImperialCollegeLondon/OstRipening.git
   2. Configure conda
      ```python
      conda update conda
@@ -63,3 +63,4 @@ Alternatively, contact Ademola Adebimpe:
 
   - Email: **a.adebimpe21@imperial.ac.uk**
   - Additional Email: **ai.bimpe@gmail.com**
+
