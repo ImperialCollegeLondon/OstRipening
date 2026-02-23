@@ -8,16 +8,15 @@ from pnflowPy.tPhaseImb import TwoPhaseImbibition
 
 
 class PDrainage(TwoPhaseDrainage):
-    cycle = 0
-    def __new__(cls, obj, writeData=False, writeTrappedData=True):
-        obj.__class__ = PDrainage
-        return obj
-    
     def __init__(self, obj, writeData=False, writeTrappedData=True):
         super().__init__(obj, writeData=writeData)
         if self.writeData: self.__fileName__()
         self.prevFilled = (self.fluid==1)
         self.writeTrappedData = writeTrappedData
+<<<<<<<< Updated upstream:Percolation_without_Trapping.py
+========
+    
+>>>>>>>> Stashed changes:aia20@login.hpc.ic.ac.uk/percolation_without_trapping.py
     
     def popUpdateOilInj(self):
         k = self.ElemToFill.pop(0)
@@ -327,7 +326,7 @@ class SecImbibition(PImbibition):
 
         self.do.__initCornerApex__()
         self.__computePistonPc__()
-        self.__computePc__(self.maxPc, self.elementLists, trapping=False)
+        self.__computePc__(self.maxPc, self.elementLists, update=False, trapping=False)
 
         self._areaWP = self._cornArea.copy()
         self._areaNWP = self._centerArea.copy()
