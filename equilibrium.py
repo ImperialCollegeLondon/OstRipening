@@ -4,227 +4,186 @@ import math
 import os
 import dill
 
-import OstRipening.temp as temp
-from OstRipening.utilities_numba import *
-from OstRipening.cluster import *
+from . import temp
+from .utilities_numba import *
+from .cluster import *
+
 import pnflowPy.tPhaseD as tPhaseD
 import pnflowPy.tPhaseImb as tPhaseImb
 
+
 _temp = temp.TempArrays()
-MEMORY_DIR = f"equilibrium_results/1/bent_aqAvgPresAvgClustPc_alpha1dot0"
+MEMORY_DIR = f"equilibrium_results/clustVolAdjusted3/bent_aqAvgPresAvgClustPc_alpha0dot617"
 os.makedirs(MEMORY_DIR, exist_ok=True)
-_a, alpha = 0, 1.0
+_a, alpha = 0, 0.617
 
 def initialize(self, pc_min=1.0e-30, pc_max=1.0e30):
     print('---------------------------------------------------------------------------')
     print('-------------------------Equilibrium Model---------------------------------')
     
-    clustW = self.clusterW
-    clustNW = self.clusterNW
-
+    cWP = self.cWP
+    cNWP = self.cNWP
+    
     # re-size the clusters
-    clustNW.resizeClusters(0, ostMode=True)
-    clustW.resizeClusters(0, ostMode=True)
+    cNWP.resizeClusters(0, ostMode=True)
+    cWP.resizeClusters(0, ostMode=True)
+        
     
-    # re-initialize the clusters   
-    clustW.__neighbours__(self)
-    clustNW.__neighbours__(self)
-
-    # set up some arrays
-    clustNW.valClust[:] = (clustNW.size>0)
-    valkeys = np.flatnonzero(clustNW.valClust).astype(np.int32)
-    updateToDrainImbibe_numba(valkeys, clustNW.members, clustNW.members_offset, clustNW.size, clustNW.neighbours, 
-        clustNW.toDrain, clustNW.toImbibe, clustNW.pcShrink, clustNW.pcMax, self.PcI, self.PcD, self.Rarray,
-        self.totElements, _temp.mem, True, pc_min, pc_max)
-    clustNW.valClustD[:] = clustNW.valClust & (clustNW.toDrain<=self.totElements)
-    
+    nClust = cNWP.nClusters
+    keys = np.arange(nClust).astype(np.int32)
+    self.entryPress_freezed = np.zeros(self.totElements, dtype=np.bool_)
+    cNWP.updateClusterProperties(keys, self, 1e-3, 1e30, False)
     self.satList = np.zeros(self.totElements)
     self.satList[1:-1] = self.areaWPhase[1:-1]/self.areaSPhase[1:-1]
-    clustNW.volume[valkeys] = np.bincount(
-        clustNW.clusterID[self.hasNWFluid], (1-self.satList[self.hasNWFluid])*self.volarray[self.hasNWFluid])[valkeys]
+    updateClusterVolume(cNWP.hasFluid, cNWP.clusterID, cNWP.volume, 
+        self.satList, self.volarray, self.totElements)
 
     print('done with initialization !!!')
-    #from IPython import embed; embed()
-    
+        
 
 
 def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
-    clust = self.clusterNW
-    clustW = self.clusterW
-    cond = np.flatnonzero(clust.valClustD)
+    cNWP = self.cNWP
+    cWP = self.cWP
     
-    clust.pc[cond] = alpha*clust.pcMax[cond]+(1-alpha)*clust.pc[cond]
-    #clust.pc[cond] = np.maximum(alpha*clust.pcMax[cond]+(1-alpha)*clust.pcShrink[cond], clust.pc[cond])
-    self.aqAvgPres = (clust.pc*clust.volume).sum()/clust.volume.sum() + _a
+    Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
+    arrr = np.ones(self.totElements, dtype=bool)
+    arrr[[-1,0]] = False
+    do.update_areas_conductances(self, arrr, Pc, False, True, True)
+    hasFluid = cNWP.hasFluid
+    self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
+    cNWP.volume[:] = np.bincount(cNWP.clusterID[hasFluid], (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)
+    
+    cond = np.flatnonzero(cNWP.valClustD)
+    aqAvgPres0 = (cNWP.pc*cNWP.volume).sum()/cNWP.volume.sum()
+    cPc = cNWP.pc.copy()
+    cVol = cNWP.volume.copy()
+    satList = self.satList.copy()
+    
+    cNWP.pc[cond] = alpha*cNWP.pcMax[cond]+(1-alpha)*cNWP.pc[cond]
+    arrr = np.ones(self.totElements, dtype=bool)
+    arrr[[-1,0]] = False
+    adjustVolume = True
+    
+    if adjustVolume:
+        Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
+        do.update_areas_conductances(self, arrr, Pc, False, True, True)
+        self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
+        cNWP.volume[:] = np.bincount(cNWP.clusterID[hasFluid], (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)
+       
+    
+    self.aqAvgPres = (cNWP.pc*cNWP.volume).sum()/cNWP.volume.sum()
     keysToUpdate = _temp.resCond
-    clust.drainEvents, clust.imbEvents = 0, 0
-    initialSw = self.satW
-    self.validToShrink = clust.valClust & (clust.pcShrink>self.aqAvgPres)
-    self.validToGrow = clust.valClustD & (clust.pcMax<self.aqAvgPres)
-    print(f'initial Sw = {self.satW}')
-    writeData(self, clust)
-
+    cNWP.drainEvents, cNWP.imbEvents = 0, 0
+    self.satW = initialSw = (self.satList*self.volarray*self.isinsideBox).sum()/self.volarray[self.isinsideBox].sum()
+    self.validToShrink = cNWP.valClust & (cNWP.pcShrink>self.aqAvgPres)
+    self.validToGrow = cNWP.valClustD & (cNWP.pcMax<self.aqAvgPres)
+    print(f'initial Sw = {self.satW} avgPres = {self.aqAvgPres}')
+    writeData(self, cNWP)
+    
+    cnt = 0
     while True:
-        condG = (clust.valClustD & (clust.pc <= self.aqAvgPres) & (clust.pcMax <= self.aqAvgPres))
+        cnt += 1
+        condG = (cNWP.valClustD & (cNWP.pc <= self.aqAvgPres) & (cNWP.pcMax <= self.aqAvgPres))
         if condG.any():
             keys = np.flatnonzero(condG).astype(np.int32)
-            toDrain = clust.toDrain[keys]
+            toDrain = cNWP.toDrain[keys]
             print('$$:  ', keys, toDrain)
-            clust.drainEvents += keys.size
-            _mem, neigh = addMembers(self, keys, toDrain, clust)
-            clust.updateClusterNeighbours(np.unique(clust.clusterID[_mem]), self)
-            #clust.updateNeighMatrix(self, neigh)
+            cNWP.drainEvents += keys.size
+            #print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#')
+            #from IPython import embed; embed()
+            keys_to_update, _mem = addMembers(self, keys, toDrain, cNWP)
             
-            memkeys = clust.clusterID[_mem]
-            keysToUpdate[memkeys] = True
-            toDrainKeys = np.unique(memkeys)
-            updateToDrainImbibe_numba(toDrainKeys, clust.members, clust.members_offset, clust.size, 
-                clust.neighbours, clust.toDrain, clust.toImbibe, clust.pcShrink, clust.pcMax, 
-                self.PcI, self.PcD, self.Rarray, self.totElements, _temp.mem, True, pc_min, pc_max)
-            clust.disappearCluster(self, pc_min, pc_max)
-            clust.valClust[:] = (clust.size>0)
-            clust.valClustD[:] = clust.valClust & (clust.toDrain<=self.totElements)
+            cNWP.updateClusterProperties(keys_to_update, self, 1e-3, 1e30, False)
             
-            print('~~~~~~~~~~~~~~')
-            try:
-                tPhaseD.__CondTP_Drainage__(self, clust.pc[clust.clusterID])
-            except:
-                from IPython import embed; embed()
+            Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
+            self.is_oil_inj = True
+            mem = np.zeros(self.totElements, dtype=np.bool_)
+            mem[_mem] = True
+            do.update_areas_conductances(self, mem, Pc, False, True, True)
             self.satList[_mem] = self._cornArea[_mem]/self.areaSPhase[_mem]
+            
+            
 
-        
-        condS = (clust.valClust & (clust.pc > self.aqAvgPres) & (clust.pcShrink > self.aqAvgPres))
+        condS = cNWP.valClust & (((cNWP.pc > self.aqAvgPres) & (cNWP.pcShrink > self.aqAvgPres)))
         if condS.any():
             keys = np.flatnonzero(condS).astype(np.int32)
-            #print('????????????????????/')
-            #from IPython import embed; embed()
+            print('@@:  ', keys, cNWP.toImbibe[keys])
+            cond = np.zeros(cNWP.nClusters, dtype=np.bool_)
+            cond[keys] = True
+            
             for k in keys:
-                clustW.fill_with_phase(clust.toImbibe[k], clust.pcShrink[k], self)
-        
-            # clusters to shrink
-            toImbibe = clust.toImbibe[keys]
-            print('@@:  ', keys, toImbibe)
-            clust.imbEvents += keys.size
-            self.satList[toImbibe] = 1.0
-
-            mem, neigh = _temp.mem, _temp.done
-            mem[mem] = False
-            neigh[neigh] = False
-            for k in keys:
-                mem[clust[k].members] = True
-                neigh[clust.neighbours[k]] = True
-
-            #mem = clust.members[keys].any(axis=0)
-            #neigh = mem|clust.neighbours[keys].any(axis=0)
-            neigh |= mem
-            mem[toImbibe] = False
+                toImb = cNWP.toImbibe[k]
+                cWP.fill_with_phase(toImb, cNWP.pcShrink[k], self)
+                cNWP.unfill_phase(toImb, self.PcI[toImb])
+                cNWP.imbEvents += 1
+                self.satList[toImb] = 1.0
+                neigh = self.connectivity_graph[toImb]
+                cids = cNWP.clusterID[neigh]
+                cids = cids[cids>=0]
+                cond[cids] = True
+                
+            keys_to_update = np.flatnonzero(cond).astype(np.int32)
+            mem = np.zeros(self.totElements, dtype=np.bool_)
+            for k in keys_to_update:
+                mem[cNWP[k].members] = True
+            mem &= cNWP.hasFluid
             _mem = np.flatnonzero(mem).astype(np.int32)
-            oldMemKeys = clust.clusterID[_mem]
-
-            removeMembers(self, keys, toImbibe, clust)
-            #clust.updateNeighMatrix(self, neigh[self.tList])
-            clust.updateClusterNeighbours(np.unique(clust.clusterID[_mem]), self)
-            newMemKeys = np.unique(clust.clusterID[_mem])
-            updateToDrainImbibe_numba(newMemKeys, clust.members, clust.members_offset, clust.size,
-                clust.neighbours, clust.toDrain, clust.toImbibe, clust.pcShrink, clust.pcMax, 
-                self.PcI, self.PcD, self.Rarray, self.totElements, _temp.mem, True, pc_min, pc_max)
-            clust.valClustD[:] = clust.valClust & (clust.toDrain<=self.totElements) #revise
-            clust.disappearCluster(self, pc_min, pc_max)
-            clust.valClust[:] = (clust.size>0)
-            clust.valClustD[:] = clust.valClust & (clust.toDrain<=self.totElements)
-
-            tPhaseImb.__CondTPImbibition__(self, mem, clust.pc[clust.clusterID], True, True)
-            self.satList[_mem] = self._areaWP[_mem]/self.areaSPhase[_mem]
+            cNWP.updateClusterProperties(keys_to_update, self, 1e-3, 1e30, True)
+            Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
+            self.is_oil_inj = False
+            do.update_areas_conductances(self, mem, Pc, False, True, True)
+            self.satList[mem] = self._cornArea[mem]/self.areaSPhase[mem]
+            
+            
         
         if not (condG.any() or condS.any()):
             break
-
+            
+       
         self.satW = ((self.satList[self.isinsideBox]*self.volarray[self.isinsideBox]).sum()/
                         self.totVoidVolume)
-        valkeys = np.flatnonzero(clust.valClust).astype(np.int32)
-        clust.volume[valkeys] = np.bincount(
-            clust.clusterID[clust.hasFluid], (1-self.satList[clust.hasFluid])*self.volarray[clust.hasFluid])[valkeys]
+        valkeys = np.flatnonzero(cNWP.valClust).astype(np.int32)
+        cNWP.volume[valkeys] = np.bincount(
+            cNWP.clusterID[cNWP.hasFluid], (1-self.satList[cNWP.hasFluid])*self.volarray[cNWP.hasFluid])[valkeys]
 
-        #input('waittt!!!!')
-        writeData(self, clust)
-
-        for k in range(clust.nClusters):
-            if (clust.size[k]==0):
-                if (clust[k].neighbours.size!=0):
-                    print(k, clust[k].neighbours)
-            else:
-                #neigh = np.unique(np.concatenate(self.connectivity_graph[clust[k].members]))
-                #from IPython import embed; embed()
-                neigh = np.unique(np.concatenate(self.connectivity_graph[clust[k].members]))
-                nonMem = neigh[clust.clusterID[neigh]!=k]
-                if clust.hasFluid[nonMem].any() or (nonMem.size != clust[k].neighbours.size):
-                    print(k, clust[k].neighbours, neigh)
-                    input('waiittttttttttttttt!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-    #print('~~~~~~~########~~~~~~~~~~~~')
-    #from IPython import embed; embed()
-    # satListI = self.satList.copy()
-    # self.capPresMin = self.aqAvgPres
-    # tPhaseImb.__CondTPImbibition__(self, overrideTrapping=True)
-    # satListI[1:-1] = self._areaWP[1:-1]/self.areaSPhase[1:-1]
-    # satW_I = ((satListI[self.isinsideBox]*self.volarray[self.isinsideBox]).sum()/self.totVoidVolume)
-
-    # satListD = self.satList.copy()
-    # self.capPresMax = self.aqAvgPres
-    # tPhaseD.__CondTP_Drainage__(self)
-    # satListD[1:-1] = self._cornArea[1:-1]/self.areaSPhase[1:-1]
-    # satListD[self.fluid==0] = 1.0
-    # satW_D = ((satListD[self.isinsideBox]*self.volarray[self.isinsideBox]).sum()/self.totVoidVolume)
-
-
-    #print(f'@alpha={alpha}, satW_I={satW_I}, satW_D={satW_D}, previous_satW={self.satW}')
-    print(f'@alpha={alpha}, initial_sat={initialSw}, final_sat={self.satW}')
+        writeData(self, cNWP)
+        
+        print('\n\n')
+        
+    print(f'{cnt}s @alpha={alpha}, initial_sat={initialSw}, final_sat={self.satW}')
 
     print('Im done !!!')
-    from IPython import embed; embed()
 
 
-def addMembers(self, keys, toDrain, clust):
-    clusterW = self.clusterW
-    mem = _temp.mem
-    mem[mem] = False
+def addMembers(self, keys, toDrain, cNWP):
+    cWP = self.cWP    
+    keys_to_update = np.zeros(cNWP.nClusters, dtype=np.bool_)
+    mem = np.zeros(self.totElements, dtype=np.bool_)
+    keys_to_update[keys] = True
     
     for i in range(toDrain.size):
         ii, k = toDrain[i], keys[i]
         
-        if clust.hasFluid[ii]:
+        if cNWP.hasFluid[ii]:
             continue
         
         if self.isCircle[ii]:
-            clusterW.unfill_phase(ii, self.PcD[ii])
+            cWP.unfill_phase(ii, self.PcD[ii])
 
-        clust.fill_with_phase(ii, self.PcD[ii], self)
-        newK = clust.clusterID[ii]
-        memID = clust[newK].members
-        mem[memID] = True       
-
-    mem[[-1, 0]] = False
-    _mem = np.flatnonzero(mem).astype(np.int32)
-    try:
-        print(_mem)
-        thr = np.concatenate(self.PTConData[_mem[self.isPore[_mem]]])
-        mem[thr] = True
-    except ValueError:
-        pass
+        cNWP.fill_with_phase(ii, self.PcD[ii], self)
+        cid = cNWP.clusterID[ii]
+        keys_to_update[cid] = True
+        mem[cNWP[cid].members] = True
     
-    for k in keys:
-        clust.neighbours[k] = []
-    
-    return _mem, mem[self.tList]
+    return np.flatnonzero(keys_to_update).astype(np.int32), np.flatnonzero(mem)
+        
 
 
-def removeMembers(self, keys, toImbibe, clust):
+def removeMembers(self, keys, toImbibe, cNWP):
     for i in range(toImbibe.size):
         k, toImb = keys[i], toImbibe[i]
-        #print(':::::@@@@@@@@@@@@@@')
-        #from IPython import embed; embed()
-        #clust.neighbours[k, clust[k].neighbours] = False
-        clust.neighbours[k] = []
-        clust.unfill_phase(toImb, self.PcI[toImb])
+        cNWP.unfill_phase(toImb, self.PcI[toImb])
 
 
 def writeData(self, clust):
@@ -241,7 +200,7 @@ def writeData(self, clust):
         np.savetxt(f4, [clust.clusterID], delimiter=',', fmt='%g')
         np.savetxt(f7, [[clust.imbEvents, clust.drainEvents]], delimiter=',', fmt='%g')
         f8.write(str(self.satW)+',')
-        np.savetxt(f9, [clust.size], delimiter=',', fmt='%g')
+        np.savetxt(f9, [clust.sizes], delimiter=',', fmt='%g')
         np.savetxt(f10, [self.satList], delimiter=',', fmt='%g')
 
        
