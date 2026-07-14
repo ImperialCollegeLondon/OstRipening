@@ -7,7 +7,7 @@ import joblib
 
 sys.path.append("./pnflowPy")
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from pnflowPy.inputData import InputData
+
 from pnflowPy.network import Network
 import pnflowPy.sPhase as sPhase
 import pnflowPy.tPhaseD as tPhaseD
@@ -17,6 +17,7 @@ from pnflowPy.tPhaseD import TwoPhaseDrainage as PDrainage
 from pnflowPy.tPhaseImb import TwoPhaseImbibition as PImbibition
 from pnflowPy.SecondaryProcesses import SecDrainage, SecImbibition 
 
+from .inputData import InputData
 from .timeDependency import TimeDependency
 from . import timeDependency as tDependency
 
@@ -39,17 +40,22 @@ def main():
 
         input_data = InputData(input_file_name)
         netsim = Network(input_file_name)
-        netsim.data_dir = os.path.dirname(input_file_name)
         
         # Single Phase computation
         sPhase.initialize(netsim)
         sPhase.singlephase(netsim)
-        #from IPython import embed; embed()
-        
        
         writeData = True
         fillTillNWDisconnected = True
-        state_data = input_data.loadState()
+        
+        try:
+            status, loaded_obj = load_file(input_data, 'LOAD_INIT_NETWORK_STATE')
+            assert status==0
+        except Exception as exc:
+            print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
+            return 1
+        
+        state_data = input_data.loadState('LOAD_INIT_NETWORK_STATE')
         if state_data[0]=='T':
             file_path = state_data[1]
             try:
@@ -58,8 +64,6 @@ def main():
             except Exception as exc:
                 print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
                 return 1
-                
-        #from IPython import embed; embed()
         
         # two Phase simulations
         if input_data.satControl():
@@ -127,39 +131,32 @@ def main():
                     tPhaseImb.imbibition(netsim)
                 firstCycle = False
         else:
-            from IPython import embed; embed()
+            #from IPython import embed; embed()
             do.updateObj(netsim, loaded_obj)
             netsim.cNWP.network = netsim
         
-        equilibrium = False
-        start_from_scratch = True
-        if equilibrium:
-            #from IPython import embed; embed()
-            from . import equilibrium
+        input_data.initRipeningParams(netsim)
+        input_data.res_dir(netsim)
+        if not netsim.mode:
+            import OstRipening.mequilibrium as equilibrium
             equilibrium.initialize(netsim)
             equilibrium.equilibrate(netsim)
         else:
-            #from IPython import embed; embed()
-            if netsim.title=='Bentheimer' or netsim.title=='test2D':
-                D = 4.89e-9
-                imposedP = 1e6
-            elif netsim.title=='BentSepi600':
-                D = 4.75e-9
-                imposedP = 8e6
-                #D = 4.89e-9
-                #imposedP = 1e6
-            if start_from_scratch:
-                TimeDependency(
-                    netsim, netsim.capPresMin, steps=40000, dt=1.5, 
-                    D=D, imposedP=imposedP,                  
-                    H = 7.8e-6)
-        
+            TimeDependency(netsim)
+            try:
+                status, loaded_obj = load_file(input_data, 'LOAD_INIT_RIPENING_STATE')
+                assert status==0
+            except Exception as exc:            
+                print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
+                return 1
+            
+            do.updateObj(netsim, loaded_obj)
+            if not hasattr(netsim, 'totalTime'):
                 tDependency.initialize(netsim)
-                
-            tDependency.simulateOstRip(netsim, freshStart=start_from_scratch)
+            tDependency.simulateOstRip(netsim)
+
             
         print("\n\n Simulation finished successfully!\n")
-        from IPython import embed; embed()
                    
         
     except Exception as exc:
@@ -171,17 +168,21 @@ def main():
 
     return 0
 
-def load_file(file_path, netsim):
-    try:
-        #file_path = os.path.join(MEMORY_DIR, filename+".pkl")
-        loaded_obj = joblib.load(file_path)
-        do.updateObj(netsim, loaded_obj)
-        write_drainage_result(netsim)
-        return 0
-    except Exception as exc:
-        print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
-        return 1
+def load_file(input_data, case):
+    status = 0
+    loaded_obj = {}
 
+    state_data = input_data.loadState(case)
+    if state_data[0]=='T':
+        file_path = state_data[1]
+        try:
+            loaded_obj = joblib.load(file_path)
+            #netsim.satW = loaded_obj['satW']
+        except Exception as exc:
+            status = 1
+            
+    
+    return status, loaded_obj
 
 def write_drainage_result(self):
     print('----------------------------------------------------------------------------------')

@@ -1,18 +1,14 @@
 import numpy as np
-from joblib import dump, load, Parallel, delayed
-from scipy import optimize
-from numba import njit, prange, jit, types, typeof
-from numba.experimental import jitclass
-from numba.types import int32, float64, Array
-from sortedcontainers import SortedList
+from numba import njit, prange
+from numba.types import int32, float64
 
 from pnflowPy.cluster import Cluster as clust
 import pnflowPy.utilities as do
 from pnflowPy.cluster import *
 
 from . import temp
-from .utilities_numba import *
 
+from .utilities_numba import *
 
 import warnings
 from numba.core.errors import NumbaDebugInfoWarning
@@ -44,14 +40,14 @@ class Cluster(clust):
 
             if self.phase==0: return
 
-            attrList = ['pcShrink', 'pcMax', 'volume', 'volShrink', 'volMax', 'volTotal', 'minPcArray',
-                        'moles', 'molesShrink', 'molesMax', 'netClustMoles', 'netMolesAfterLastUpdate',
-                        'toDrain', 'toImbibe', 'valClust', 'valClustD', 'validToShrink', 'validToGrow',
-                        'prequilibratedMoles', 'pcAfterLastUpdate']
-            dtypes = [np.float32, np.float32, np.float64, np.float32, np.float32, np.float64, np.float32,
-                np.float64, np.float32, np.float32, np.float64, np.float64,
-                np.int32, np.int32, np.bool_, np.bool_, np.bool_, np.bool_, 
-                np.float64, np.float32]
+            attrList = ['pcShrink', 'pcMax', 'volume', 'volShrink', 'volMax', 'volTotal', 
+                        'minPcArray', 'moles', 'molesShrink', 'molesMax', 'netClustMoles', 
+                        'netMolesAfterLastUpdate', 'toDrain', 'toImbibe', 'valClust',
+                        'valClustD', 'validToShrink', 'validToGrow', 'prequilibratedMoles','pcAfterLastUpdate']
+            dtypes = [np.float32, np.float32, np.float64, np.float32, np.float32, np.float64, 
+                    np.float32, np.float64, np.float32, np.float32, np.float64, np.float64,
+                    np.int32, np.int32, np.bool_, np.bool_, np.bool_, np.bool_, np.float64,
+                    np.float32]
             
             for i, attr in enumerate(attrList):
                 if not hasattr(self, attr):
@@ -920,7 +916,7 @@ def compute_fluxes_moles_pc_conc_numba0(flux, netFlux, len_tij_valid, gasConc, v
         elif f < 0.0:
             if (aqMoles[t] - minMoles[t]) <= 1e-3*aqMoles[t]:
                 f = 0.0
-        
+
         flux[i] = f
         netFlux[t] += f
         netFlux[p] -= f
@@ -930,7 +926,7 @@ def compute_fluxes_moles_pc_conc_numba0(flux, netFlux, len_tij_valid, gasConc, v
             netflux_Aq -= f
 
     dt = _dt
-    for e in range(nfSize):   
+    for e in range(nfSize):
         if netFlux[e] >= 0.0: continue
         tratio =  (minMoles[e] - aqMoles[e])/netFlux[e]
         if tratio < 0.0:
@@ -1021,7 +1017,7 @@ def statistics_numba(elemToUpdateW, elemtoUpdateNW, aqMoles, satList, volarray,
             total_aq_vol_in_box += (satList[i]*volarray[i])
 
     for k in range(nClusters):
-        total_moles_in_gas += clust_moles[k]     
+        total_moles_in_gas += clust_moles[k]
         if valClust[k]:
             pcVolSum += (clusterPc[k]*clusterVol[k])
             volSum += clusterVol[k]

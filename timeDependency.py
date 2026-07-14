@@ -1,48 +1,30 @@
 import numpy as np
 from time import time
-import math
 import os
 import joblib
 from numba import prange, njit
-
-import pnflowPy.tPhaseD as tPhaseD
-import pnflowPy.tPhaseImb as tPhaseImb
-
 from .cluster import *
 from . import temp
 
 
 
-MEMORY_DIR = f"ostwald_ripening_results/maxPc1e5/adjustClustVol/impP_1e6_D_4dot89minus9_H_7dot8minus6_clustPcalpha0dot617_minPc1eminus3_1swaiting"
-alpha = 0.617
-
-os.makedirs(MEMORY_DIR, exist_ok=True)
+#os.makedirs(MEMORY_DIR, exist_ok=True)
 _temp = temp.TempArrays()
 
 
 class TimeDependency:
-    def __init__(self, network, Pc, T=298, imposedP=1e6, H=7.8e-6, D=7.3e-9, 
-                 steps=10, dt=0.0005, adjustTime=False, moles_tol=1e-18, pc_tol=1e-4, max_iter=50):
+    def __init__(self, network):
         
         print('----------------------------------------------------------------------------------')
         print('-----------------------------Time Dependent Ostwald Ripening ---------------------')
  
         # initialising the parameters
-        network.steps = steps
-        network.H = H  #mol m-3 pa-1
-        network.D = D #1.2e-9  #m2/s
-        network.num = 1
+        
         network.R = 8.314  #J/mol.K
-        network.T = T    #K
-        network.imposedP = imposedP    #1MPa
-        network.HimposedP = H*imposedP
-        network.Pc = Pc
-        network._dt = dt
-        network.adjustTime = adjustTime
-        network.moles_tol = moles_tol
-        network.pc_tol = pc_tol
-        network.max_iter = max_iter
-        network.RT = 8.314*T
+       
+        network.HimposedP = network.H*network.imposedP
+        
+        network.RT = 8.314*network.T
         network.half_pi = np.pi/2.0
         
 
@@ -65,14 +47,15 @@ def initialize(self):
 
     # initialize the flow rates of the phases
     #initializeFlowrate(self)
-
     # for writing data/results
     self.resultsP_str = "# Step,totalFlux,total_delta_nMoles,Sw, \
         #cluster_growth,#cluster_shrinkage,AvgPressure,totMoles_W,totMoles_NW,totMoles"
-    # self.__fileName__()
+    
+    self.j , self.ii, self.totTime, self.totalTime = 0, 0, 0.0, 0.0
+    self.initialized = True
+    writeData(self, round(self.totalTime,3))
     print('Initializing timeDependency completed!!!', self.cNWP.moles.sum())
     print('time spent:  ', time()-st)
-   
 
 
 def settingUpArrays(self, cNWP, excludeCircles=False, 
@@ -94,7 +77,9 @@ def settingUpArrays(self, cNWP, excludeCircles=False,
     
     do.update_areas_conductances(self, arrr, Pc, False, True, True)
     self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
-    cNWP.volume[:] = np.bincount(cNWP.clusterID[hasFluid], (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)
+    cNWP.volume[:] = np.bincount(cNWP.clusterID[hasFluid], 
+                                (1-self.satList[hasFluid])*self.volarray[hasFluid],
+                                cNWP.nClusters)
     
     self.entryPress_freezed = np.zeros(totElements, dtype=np.bool_)
     self.oldSatW = self.satW 
@@ -110,12 +95,16 @@ def settingUpArrays(self, cNWP, excludeCircles=False,
     cPc = cNWP.pc.copy()
     cMoles = (cNWP.pc+self.imposedP)*cNWP.volume/self.RT
     
-    cNWP.pc[cond] = alpha*cNWP.pcMax[cond]+(1-alpha)*cPc[cond]
+    cNWP.pc[cond] = self.alpha*cNWP.pcMax[cond]+(1-self.alpha)*cPc[cond]
     Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
     do.update_areas_conductances(self, arrr, Pc, False, True, True)
         
     self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
-    cNWP.volume[cond] = np.bincount(cNWP.clusterID[hasFluid], (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)[cond]
+    cNWP.volume[cond] = np.bincount(cNWP.clusterID[hasFluid],
+                                (1-self.satList[hasFluid])*self.volarray[hasFluid],
+                                cNWP.nClusters)[cond]
+    #updateClusterVolume(cNWP.hasFluid, cNWP.clusterID, cNWP.volume, 
+    #    self.satList, self.volarray, totElements)
         
     cNWP.maxGasPc = cNWP.pc.max()
     cNWP.moles[cond] = (self.imposedP + cNWP.pc[cond])*cNWP.volume[cond]/self.RT
@@ -153,7 +142,7 @@ def compute_fluxes_moles_pc_conc(self, cNWP):
         cNWP.clusterID, cNWP.moles, cNWP.volume, cNWP.pc, cNWP.sizes, cNWP.netClustMoles, 
         cNWP.netMolesAfterLastUpdate, cNWP.members, cNWP.mem_offsets, 
         self.elemToUpdateW, self.elemToUpdateNW, self.aqueousMoles, self.minMoles, cNWP.minPcArray,
-        self.maxPc, _temp.filterNext, self.imposedP, self.D, self.H, self.RT, self._dt, self.moles_tol1)
+        self.maxPc, _temp.filterNext, self.imposedP, self.D, self.H, self.RT, self._dt, self.moles_tol)
     cNWP.adjustClusterPcVolume(self, self.moles_tol, self.pc_tol)
 
 
@@ -170,8 +159,7 @@ def assignSaturation(self, cNWP):
 
 
 
-def simulate(self, clust, ii, startTime, totTime, totalTime, minTime, waitTime,
-    moles_tol, pc_tol, max_iter):
+def simulate(self, ii, startTime, totTime, totalTime, minTime, waitTime):
     ''' main simulation loop for time-dependent Ostwald ripening '''
 
     cNWP = self.cNWP
@@ -202,6 +190,15 @@ def simulate(self, clust, ii, startTime, totTime, totalTime, minTime, waitTime,
         
         writeOnScreen(self, cNWP, ii, totTime, totalTime, startTime)
         writeData(self, round(totalTime,3))
+        if totalTime > self.timeToSave:
+            try:
+                filename = os.path.join(self.MEMORY_DIR, f"netsim_time_Dependent_{self.j}.pkl")
+                saveState(self, filename)
+                self.j += 1
+                self.timeToSave = minTime*self.j
+            except:
+                print('Could not pickle/save the state !!!')
+
         ii += 1
         
         if nShrinkage or nGrowth:
@@ -217,66 +214,35 @@ def simulate(self, clust, ii, startTime, totTime, totalTime, minTime, waitTime,
     return ii, totTime, totalTime, waitTime
 
 
-def simulateOstRip(self, implicit=True, freshStart=True):
-    duration = 3600*24*2  # 24-hours
+def simulateOstRip(self):
     st = time()
     
-    if not os.path.isfile('volarray_bent.dat'):
-        np.savetxt('volarray_bent.dat', self.volarray)
-    if not os.path.isfile('coordinates_bent.dat'):
-        np.savetxt('coordinates_bent.dat', 
-                    np.column_stack((self.x_array, self.y_array, self.z_array)))
-        
-    # records data in at most 10-mins intervals if no event occur
-    if hasattr(self, 'imposedP'):
-        print(f"\nalpha={alpha}       imposedP={self.imposedP}        aqAvgPres={self.initialAvgPres}\
-                H={self.H}      D={self.D}   \n")
+    print(f"\nalpha={self.alpha}       imposedP={self.imposedP}        \
+            aqAvgPres={self.initialAvgPres}      H={self.H}      D={self.D}   \n")
+
+    cNWP = self.cNWP
+    if not hasattr(_temp, 'nClusters'):
+        temp.TempArrays.formTempClustArrays(cNWP.nClusters)
     
-    self.timesWithNoEvent = 0
+    
+    writeOnScreen(self, cNWP, self.ii, self.totTime, self.totalTime, st)
+    self.j += 1
+    self.ii += 1
     minTime = 600
-    waitTime = 60.0
-    if freshStart:
-        self.j , self.ii, self.totTime, self.totalTime = 1, 1, 0.0, 0.0
-        self.updateClust = False
-        clust = self.cNWP
-        clust.drainEvents, clust.imbEvents = 0, 0
-        writeOnScreen(self, clust, self.ii, self.totTime, self.totalTime, st)
-        writeData(self, round(self.totalTime,3))
-        
-    else:
-        file_path = os.path.join(MEMORY_DIR, f"netsim_time_Dependent_720_mins.pkl")
-        loaded_obj = joblib.load(file_path)
-        do.updateObj(self, loaded_obj)
-        clust = self.cNWP
-        
-        writeOnScreen(self, clust, self.ii, self.totTime, self.totalTime, st)
-        temp.TempArrays.formTempClustArrays(clust.nClusters)
-        self.j += 1
+    waitTime = 0.0
     
-    timeToSave = minTime*self.j
-    totalMoles = clust.moles.sum() + self.aqueousMoles[self.elemToUpdateW].sum()
-    self.moles_tol1 = self.moles_tol*10
     
-    while self.totalTime < duration:
+    self.timeToSave = minTime*self.j
+    
+    while self.totalTime < self.duration:
         try:
             self.ii, self.totTime, self.totalTime, waitTime = simulate(
-                self, clust, self.ii, st, self.totTime, self.totalTime, minTime, waitTime, self.moles_tol, 
-                self.pc_tol, self.max_iter)
+                self, self.ii, st, self.totTime, self.totalTime, minTime, waitTime)
                 
-            if self.totalTime > timeToSave:
-                try:
-                    filename = os.path.join(MEMORY_DIR, f"netsim_time_Dependent_{self.j}_mins.pkl")
-                    saveState(self, filename)
-                    
-                    self.j += 1
-                    timeToSave = minTime*self.j
-                except:
-                    print('there is an error in pickling!!!')
-                    from IPython import embed; embed()
             
         except:
-            print('there is an error in the simulation, check line 1438!!!')
-            from IPython import embed; embed()
+            print('there is an error in the simulation, aborting!!!')
+            return
             
     print('::::::::::::::::::::::::::::')
 
@@ -296,9 +262,10 @@ def writeOnScreen(self, clust, ii, totTime, totalTime, startTime):
         self.satW, avgAqPres)))
 
 def saveState(self, fname):
-    state_attrs = ['satW', 'rng', 'fluid', 'cWP', 'cNWP', '_dt',  'satList', 
-        'H', 'Pc', 'RT', 'imposedP', 'HimposedP', 'D', 'len_tij_valid', 'elemToUpdateW', 
-        'elemToUpdateNW', 'gasConc', 'aqueousMoles', 'minMoles', 'initAqConc',
+    state_attrs = ['satW', 'rng', 'fluid', 'cWP', 'cNWP', '_dt',  'satList', 'maxPc',
+        'H', 'Pc', 'RT', 'imposedP', 'HimposedP', 'D', 'len_tij_valid', 
+        'm_inited', 'm_initedApexDist', 'm_advPc', 'm_recPc',
+        'elemToUpdateW', 'elemToUpdateNW', 'gasConc', 'aqueousMoles', 'minMoles', 'initAqConc',
        'initialAvgPres', 'flux', 'netFlux', 'j', 'ii', 'totTime', 'totalTime',
        'moles_tol', 'pc_tol', 'max_iter', 'entryPress_freezed']
 
@@ -308,6 +275,7 @@ def saveState(self, fname):
 
 
 def writeData(self, totalTime):
+    MEMORY_DIR = self.MEMORY_DIR
     with open(os.path.join(MEMORY_DIR, 'clustPcOstRipening_bent.dat'), 'a') as f1,\
             open(os.path.join(MEMORY_DIR, 'clustVolOstRipening_bent.dat'), 'a') as f2,\
             open(os.path.join(MEMORY_DIR, 'clustMolesOstRipening_bent.dat'), 'a') as f3,\

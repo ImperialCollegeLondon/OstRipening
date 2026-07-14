@@ -8,14 +8,11 @@ from . import temp
 from .utilities_numba import *
 from .cluster import *
 
-import pnflowPy.tPhaseD as tPhaseD
-import pnflowPy.tPhaseImb as tPhaseImb
+
 
 
 _temp = temp.TempArrays()
-MEMORY_DIR = f"equilibrium_results/clustVolAdjusted3/bent_aqAvgPresAvgClustPc_alpha0dot617"
-os.makedirs(MEMORY_DIR, exist_ok=True)
-_a, alpha = 0, 0.617
+
 
 def initialize(self, pc_min=1.0e-30, pc_max=1.0e30):
     print('---------------------------------------------------------------------------')
