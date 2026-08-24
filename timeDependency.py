@@ -5,6 +5,7 @@ import joblib
 from numba import prange, njit
 from .cluster import *
 from . import temp
+import pnflowPy.utilities as do
 
 
 
@@ -68,7 +69,7 @@ def settingUpArrays(self, cNWP, excludeCircles=False,
         self.TPValid, self.TValid, self.isCircle, totElements, self.nPores, self.nThroats)
     
     Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
-    arrr = np.ones(self.totElements, dtype=bool)
+    arrr = np.ones(totElements, dtype=bool)
     arrr[[-1,0]] = False
         
     hasFluid = cNWP.hasFluid
@@ -97,6 +98,7 @@ def settingUpArrays(self, cNWP, excludeCircles=False,
     
     cNWP.pc[cond] = self.alpha*cNWP.pcMax[cond]+(1-self.alpha)*cPc[cond]
     Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
+    
     do.update_areas_conductances(self, arrr, Pc, False, True, True)
         
     self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
@@ -233,23 +235,31 @@ def simulateOstRip(self):
     
     
     self.timeToSave = minTime*self.j
-    
+    with open(os.path.join(self.MEMORY_DIR, f'PermOstRipening_{self.title}.dat'), 'a') as f:
+        f.write('Pre-Ripening Permeabilities and Fractional Flow\n')
+        f.write('Wetting phase\tNon-wetting phase\tFractional Flow\n')
+        f.write(f'{round(self.krw, 6)}       {round(self.krnw, 6)}       {round(self.fw, 6)}   \n\n\n')
+        
     while self.totalTime < self.duration:
         try:
             self.ii, self.totTime, self.totalTime, waitTime = simulate(
                 self, self.ii, st, self.totTime, self.totalTime, minTime, waitTime)
-                
-            
         except:
             print('there is an error in the simulation, aborting!!!')
             return
-            
+    
+    do.computePerm(self, self.avgGasPres)
+    with open(os.path.join(self.MEMORY_DIR, f'PermOstRipening_{self.title}.dat'), 'a') as f:
+        f.write('Post-Ripening Permeabilities and Fractional Flow\n')
+        f.write('Wetting phase\tNon-wetting phase\tFractional Flow\n')
+        f.write(f'{round(self.krw, 6)}       {round(self.krnw, 6)}       {round(self.fw, 6)}   \n')
+
     print('::::::::::::::::::::::::::::')
 
 
 def writeOnScreen(self, clust, ii, totTime, totalTime, startTime):
     total_moles_in_gas, total_moles_in_aq, total_moles,\
-            self.satW, avgGasPres, avgAqPres = statistics(self, clust)
+            self.satW, self.avgGasPres, avgAqPres = statistics(self, clust)
     totalTime += totTime 
     totTime = 0.0
     
@@ -258,8 +268,8 @@ def writeOnScreen(self, clust, ii, totTime, totalTime, startTime):
         \tTotal gas moles:%4.10e \tAvg Pressure:%8.6e \tNo Shrinkage:%8.6g\
         \tNo Growth:%8.6g \tSat:%6.6g \tAqAvgPres:%6.6g" %(
         ii, round(totalTime,3), round(time()-startTime,3), total_moles_in_gas, 
-        total_moles_in_aq, total_moles, avgGasPres, clust.imbEvents, clust.drainEvents, 
-        self.satW, avgAqPres)))
+        total_moles_in_aq, total_moles, self.avgGasPres, 
+        clust.imbEvents, clust.drainEvents, self.satW, avgAqPres)))
 
 def saveState(self, fname):
     state_attrs = ['satW', 'rng', 'fluid', 'cWP', 'cNWP', '_dt',  'satList', 'maxPc',
@@ -276,16 +286,17 @@ def saveState(self, fname):
 
 def writeData(self, totalTime):
     MEMORY_DIR = self.MEMORY_DIR
-    with open(os.path.join(MEMORY_DIR, 'clustPcOstRipening_bent.dat'), 'a') as f1,\
-            open(os.path.join(MEMORY_DIR, 'clustVolOstRipening_bent.dat'), 'a') as f2,\
-            open(os.path.join(MEMORY_DIR, 'clustMolesOstRipening_bent.dat'), 'a') as f3,\
-            open(os.path.join(MEMORY_DIR, 'clustIDOstRipening_bent.dat'), 'a') as f4,\
-            open(os.path.join(MEMORY_DIR, 'dissolvedMolesOstRipening_bent.dat'), 'a') as f5,\
-            open(os.path.join(MEMORY_DIR, 'timeArrayOstRipening_bent.dat'), 'a') as f6,\
-            open(os.path.join(MEMORY_DIR, 'numberEventsOstRipening_bent.dat'), 'a') as f7,\
-            open(os.path.join(MEMORY_DIR, 'saturationOstRipening_bent.dat'), 'a') as f8,\
-            open(os.path.join(MEMORY_DIR, 'clustSizeOstRipening_bent.dat'), 'a') as f9,\
-            open(os.path.join(MEMORY_DIR, 'saturation_by_element_OstRipening_bent.dat'), 'a') as f10:
+    title = self.title
+    with open(os.path.join(MEMORY_DIR, f'clustPcOstRipening_{title}.dat'), 'a') as f1,\
+            open(os.path.join(MEMORY_DIR, f'clustVolOstRipening_{title}.dat'), 'a') as f2,\
+            open(os.path.join(MEMORY_DIR, f'clustMolesOstRipening_{title}.dat'), 'a') as f3,\
+            open(os.path.join(MEMORY_DIR, f'clustIDOstRipening_{title}.dat'), 'a') as f4,\
+            open(os.path.join(MEMORY_DIR, f'dissolvedMolesOstRipening_{title}.dat'), 'a') as f5,\
+            open(os.path.join(MEMORY_DIR, f'timeArrayOstRipening_{title}.dat'), 'a') as f6,\
+            open(os.path.join(MEMORY_DIR, f'numberEventsOstRipening_{title}.dat'), 'a') as f7,\
+            open(os.path.join(MEMORY_DIR, f'saturationOstRipening_{title}.dat'), 'a') as f8,\
+            open(os.path.join(MEMORY_DIR, f'clustSizeOstRipening_{title}.dat'), 'a') as f9,\
+            open(os.path.join(MEMORY_DIR, f'saturation_by_element_OstRipening_{title}.dat'), 'a') as f10:
        
         cNWP = self.cNWP
         np.savetxt(f1, [cNWP.pc], delimiter=',', fmt='%g')

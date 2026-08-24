@@ -13,12 +13,11 @@ class InputData(inputData):
         
         if self.data['RIPENING']:
             data = self.data['RIPENING']
-            mode = data[0]
+            alpha = data[2]
             
-            if mode=='T':
+            if data[0]=='T':
                 mode = True
                 obj.start_from_scratch = True if data[1]=='T' else False
-                alpha = data[2]
                 obj.duration = data[3] 
                 obj._dt = data[4]
                 obj.D = data[5]

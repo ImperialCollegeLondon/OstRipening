@@ -47,26 +47,14 @@ def main():
        
         writeData = True
         fillTillNWDisconnected = True
-        
-        try:
-            status, loaded_obj = load_file(input_data, 'LOAD_INIT_NETWORK_STATE')
-            assert status==0
-        except Exception as exc:
-            print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
-            return 1
-        
-        state_data = input_data.loadState('LOAD_INIT_NETWORK_STATE')
-        if state_data[0]=='T':
-            file_path = state_data[1]
-            try:
-                loaded_obj = joblib.load(file_path)
-                netsim.satW = loaded_obj['satW']
-            except Exception as exc:
-                print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
-                return 1
+
+        netsim.weights = input_data.poreFillWgt()
+
+        status, loaded_obj = load_file(input_data, 'LOAD_INIT_NETWORK_STATE')  
         
         # two Phase simulations
         if input_data.satControl():
+            print('Im inside input data contorl')
             firstDrainCycle = True
             firstImbCycle = True
             firstCycle = True
@@ -97,8 +85,8 @@ def main():
                         netsim.prop_drainage['thetaAdvAng'] = netsim.thetaAdvAng.copy()
                     else:
                         SecDrainage(netsim, writeData=writeData)
-                    if firstCycle and state_data[0]=='T':
-                        do.updateObj(netsim, loaded_obj)                        
+                    if firstCycle and status=='T':
+                        do.updateObj(netsim, loaded_obj) 
                         netsim.capPresMax = netsim.Pc
                         
                     netsim.maxPc = Pc
@@ -122,7 +110,7 @@ def main():
                     else:
                         SecImbibition(netsim, writeData=writeData)
                     
-                    if firstCycle and state_data[0]=='T':
+                    if firstCycle and status=='T':
                         do.updateObj(netsim, loaded_obj)                        
                         netsim.capPresMin = netsim.Pc
                         
@@ -131,26 +119,24 @@ def main():
                     tPhaseImb.imbibition(netsim)
                 firstCycle = False
         else:
-            #from IPython import embed; embed()
             do.updateObj(netsim, loaded_obj)
             netsim.cNWP.network = netsim
         
         input_data.initRipeningParams(netsim)
         input_data.res_dir(netsim)
         if not netsim.mode:
-            import OstRipening.mequilibrium as equilibrium
+            import OstRipening.equilibrium as equilibrium
             equilibrium.initialize(netsim)
             equilibrium.equilibrate(netsim)
         else:
             TimeDependency(netsim)
+            status, loaded_obj = load_file(input_data, 'LOAD_INIT_RIPENING_STATE')
             try:
-                status, loaded_obj = load_file(input_data, 'LOAD_INIT_RIPENING_STATE')
-                assert status==0
-            except Exception as exc:            
-                print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
-                return 1
-            
-            do.updateObj(netsim, loaded_obj)
+                if status=='T':
+                    do.updateObj(netsim, loaded_obj)
+            except:
+                print('Something went wrong while loading the state')
+                
             if not hasattr(netsim, 'totalTime'):
                 tDependency.initialize(netsim)
             tDependency.simulateOstRip(netsim)
@@ -169,19 +155,18 @@ def main():
     return 0
 
 def load_file(input_data, case):
-    status = 0
     loaded_obj = {}
-
     state_data = input_data.loadState(case)
-    if state_data[0]=='T':
+    status = state_data[0]
+   
+    if status=='T':
         file_path = state_data[1]
         try:
             loaded_obj = joblib.load(file_path)
             #netsim.satW = loaded_obj['satW']
         except Exception as exc:
-            status = 1
-            
-    
+            print("\n\n Exception on processing of loaded state: \n", exc, "Aborting!\n")
+
     return status, loaded_obj
 
 def write_drainage_result(self):

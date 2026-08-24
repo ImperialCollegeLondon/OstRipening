@@ -57,7 +57,7 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
     cVol = cNWP.volume.copy()
     satList = self.satList.copy()
     
-    cNWP.pc[cond] = alpha*cNWP.pcMax[cond]+(1-alpha)*cNWP.pc[cond]
+    cNWP.pc[cond] = self.alpha*cNWP.pcMax[cond]+(1-self.alpha)*cNWP.pc[cond]
     arrr = np.ones(self.totElements, dtype=bool)
     arrr[[-1,0]] = False
     adjustVolume = True
@@ -148,7 +148,7 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
         
         print('\n\n')
         
-    print(f'{cnt}s @alpha={alpha}, initial_sat={initialSw}, final_sat={self.satW}')
+    print(f'{cnt}s @alpha={self.alpha}, initial_sat={initialSw}, final_sat={self.satW}')
 
     print('Im done !!!')
 
@@ -176,7 +176,6 @@ def addMembers(self, keys, toDrain, cNWP):
     return np.flatnonzero(keys_to_update).astype(np.int32), np.flatnonzero(mem)
         
 
-
 def removeMembers(self, keys, toImbibe, cNWP):
     for i in range(toImbibe.size):
         k, toImb = keys[i], toImbibe[i]
@@ -184,6 +183,7 @@ def removeMembers(self, keys, toImbibe, cNWP):
 
 
 def writeData(self, clust):
+    MEMORY_DIR = self.MEMORY_DIR
     with open(os.path.join(MEMORY_DIR, 'clustPcOstRipening_bent.dat'), 'a') as f1,\
             open(os.path.join(MEMORY_DIR, 'clustVolOstRipening_bent.dat'), 'a') as f2,\
             open(os.path.join(MEMORY_DIR, 'clustIDOstRipening_bent.dat'), 'a') as f4,\
@@ -191,7 +191,7 @@ def writeData(self, clust):
             open(os.path.join(MEMORY_DIR, 'saturationOstRipening_bent.dat'), 'a') as f8,\
             open(os.path.join(MEMORY_DIR, 'clustSizeOstRipening_bent.dat'), 'a') as f9,\
             open(os.path.join(MEMORY_DIR, 'saturation_by_element_OstRipening_bent.dat'), 'a') as f10:
-       
+
         np.savetxt(f1, [clust.pc], delimiter=',', fmt='%g')
         np.savetxt(f2, [clust.volume], delimiter=',', fmt='%g')
         np.savetxt(f4, [clust.clusterID], delimiter=',', fmt='%g')
@@ -200,7 +200,7 @@ def writeData(self, clust):
         np.savetxt(f9, [clust.sizes], delimiter=',', fmt='%g')
         np.savetxt(f10, [self.satList], delimiter=',', fmt='%g')
 
-       
+
 
 
 
