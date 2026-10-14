@@ -97,7 +97,6 @@ class Cluster(clust):
             at a time (circles). Also, allow automatic filling of adjacent pore if 
             not already filled and has lower entry pressure'''
         
-      
         updated_keys, updated_toAdd, toRemove_keys, toRemove = addMembers_helper(
             keys, toAdd, self.hasFluid, ntwk.isCircle, ntwk.isPore, 
             ntwk.connectivity_graph_flat, ntwk.cg_offsets, ntwk.PcD, 

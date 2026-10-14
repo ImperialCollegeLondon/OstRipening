@@ -35,8 +35,7 @@ def initialize(self, pc_min=1.0e-30, pc_max=1.0e30):
     updateClusterVolume(cNWP.hasFluid, cNWP.clusterID, cNWP.volume, 
         self.satList, self.volarray, self.totElements)
 
-    print('done with initialization !!!')
-        
+    print('done with initialization !!!')        
 
 
 def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
@@ -49,18 +48,25 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
     do.update_areas_conductances(self, arrr, Pc, False, True, True)
     hasFluid = cNWP.hasFluid
     self.satList[hasFluid] = self._cornArea[hasFluid]/self.areaSPhase[hasFluid]
-    cNWP.volume[:] = np.bincount(cNWP.clusterID[hasFluid], (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)
+    #print('Im in equilibrate')
+    #from IPython import embed; embed()
+    cNWP.volume[:] = np.bincount(
+        cNWP.clusterID[hasFluid], 
+        (1-self.satList[hasFluid])*self.volarray[hasFluid], cNWP.nClusters)
     
     cond = np.flatnonzero(cNWP.valClustD)
     aqAvgPres0 = (cNWP.pc*cNWP.volume).sum()/cNWP.volume.sum()
     cPc = cNWP.pc.copy()
     cVol = cNWP.volume.copy()
     satList = self.satList.copy()
+    #print('Im in equilibrium')
+    #from IPython import embed; embed()
     
     cNWP.pc[cond] = self.alpha*cNWP.pcMax[cond]+(1-self.alpha)*cNWP.pc[cond]
     arrr = np.ones(self.totElements, dtype=bool)
     arrr[[-1,0]] = False
     adjustVolume = True
+
     
     if adjustVolume:
         Pc = cNWP.pc[cNWP.clusterID].astype(np.float64)
@@ -77,7 +83,11 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
     self.validToGrow = cNWP.valClustD & (cNWP.pcMax<self.aqAvgPres)
     print(f'initial Sw = {self.satW} avgPres = {self.aqAvgPres}')
     writeData(self, cNWP)
-    
+
+    # print('Im in equilibrium')
+    # from IPython import embed; embed()
+    # oldStat = cNWP.hasFluid.sum()
+
     cnt = 0
     while True:
         cnt += 1
@@ -101,7 +111,6 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
             self.satList[_mem] = self._cornArea[_mem]/self.areaSPhase[_mem]
             
             
-
         condS = cNWP.valClust & (((cNWP.pc > self.aqAvgPres) & (cNWP.pcShrink > self.aqAvgPres)))
         if condS.any():
             keys = np.flatnonzero(condS).astype(np.int32)
@@ -111,7 +120,10 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
             
             for k in keys:
                 toImb = cNWP.toImbibe[k]
-                cWP.fill_with_phase(toImb, cNWP.pcShrink[k], self)
+                # if toImb==5820:
+                #     print(f'toImb = 5820, k = {k}')
+                #     from IPython import embed; embed()
+                cWP.fill_with_phase(toImb, cNWP.pcShrink[k], self, False)
                 cNWP.unfill_phase(toImb, self.PcI[toImb])
                 cNWP.imbEvents += 1
                 self.satList[toImb] = 1.0
@@ -133,7 +145,12 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
             self.satList[mem] = self._cornArea[mem]/self.areaSPhase[mem]
             
             
-        
+        print(self.fluid.sum(), cNWP.hasFluid.sum(), (cNWP.clusterID>=0).sum())
+        # if oldStat == cNWP.hasFluid.sum():
+        #     from IPython import embed; embed()
+        # else:
+        #     oldStat = cNWP.hasFluid.sum()
+        #     input('waitttt!!!')
         if not (condG.any() or condS.any()):
             break
             
@@ -147,10 +164,12 @@ def equilibrate(self, pc_min=1.0e-30, pc_max=1.0e30):
         writeData(self, cNWP)
         
         print('\n\n')
+        #input('wait to check !!!')
         
-    print(f'{cnt}s @alpha={self.alpha}, initial_sat={initialSw}, final_sat={self.satW}')
+    print(f'{cnt}s @alpha={self.alpha}, initial_sat={initialSw}, final_sat={self.satW} #Growth={cNWP.drainEvents}, #Shrinkage={cNWP.imbEvents}')
 
     print('Im done !!!')
+    #from IPython import embed; embed()
 
 
 def addMembers(self, keys, toDrain, cNWP):
@@ -168,7 +187,7 @@ def addMembers(self, keys, toDrain, cNWP):
         if self.isCircle[ii]:
             cWP.unfill_phase(ii, self.PcD[ii])
 
-        cNWP.fill_with_phase(ii, self.PcD[ii], self)
+        cNWP.fill_with_phase(ii, self.PcD[ii], self, False)
         cid = cNWP.clusterID[ii]
         keys_to_update[cid] = True
         mem[cNWP[cid].members] = True

@@ -13,20 +13,20 @@ class InputData(inputData):
         
         if self.data['RIPENING']:
             data = self.data['RIPENING']
-            alpha = data[2]
+            alpha = data[1]
             
             if data[0]=='T':
                 mode = True
-                obj.start_from_scratch = True if data[1]=='T' else False
-                obj.duration = data[3] 
-                obj._dt = data[4]
-                obj.D = data[5]
-                obj.imposedP = data[6]
-                obj.T = data[7]
-                obj.H = data[8]
-                obj.moles_tol = data[9]
-                obj.pc_tol = data[10]
-                obj.max_iter = data[11]
+                # obj.start_from_scratch = True if data[1]=='T' else False
+                obj.duration = data[2] 
+                obj._dt = data[3]
+                obj.D = data[4]
+                obj.imposedP = data[5]
+                obj.T = data[6]
+                obj.H = data[7]
+                obj.moles_tol = data[8]
+                obj.pc_tol = data[9]
+                obj.max_iter = data[10]
                 
         obj.alpha = alpha
         obj.mode = mode
