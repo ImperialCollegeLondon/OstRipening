@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "inspected_date": "2026-10-15",
+  "upstream": {
+    "repository": "https://github.com/AIAdebimpe/percolation_without_trapping",
+    "branch": "main",
+    "commit": "1a777b62abfa952ffdfc7b138e187e62d76a980f",
+    "author": "Ademola Adebimpe"
+  },
+  "target": {
+    "repository": "https://github.com/ImperialCollegeLondon/OstRipening",
+    "base_commit": "6263ef0c147e52091cb334391ddf79c7cea620bc",
+    "directory": "percolation_without_trapping"
+  },
+  "import_policy": "Copy the four Python source files unchanged and preserve the upstream README verbatim under a distinct name; exclude generated Python bytecode.",
+  "imported_files": [
+    {
+      "upstream_path": "__init__.py",
+      "destination_path": "percolation_without_trapping/__init__.py",
+      "git_blob_sha1": "8b137891791fe96927ad78e64b0aad7bded08bdc",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "upstream_path": "main.py",
+      "destination_path": "percolation_without_trapping/main.py",
+      "git_blob_sha1": "df5212074e0522ded0d3e4884a625929c275eca5",
+      "sha256": "839850d7889a321aefc83234a81230c4cb663674f8de0cdf0593b516054ce8f7"
+    },
+    {
+      "upstream_path": "twoPhaseD.py",
+      "destination_path": "percolation_without_trapping/twoPhaseD.py",
+      "git_blob_sha1": "9001c46f362eb0d4f4d421d6e8eb3123835ff800",
+      "sha256": "915b56782c3690bbc37f11aa114d8c751d05907e3df714bdb70fda7ada3ab1e5"
+    },
+    {
+      "upstream_path": "twoPhaseImb.py",
+      "destination_path": "percolation_without_trapping/twoPhaseImb.py",
+      "git_blob_sha1": "3e5ce1c92741e58ae794553ed1aed842fc54f32c",
+      "sha256": "eb152136426fed2a899ea4cedead75555a14dd546c7394d64fecf9d291ff74dc"
+    },
+    {
+      "upstream_path": "README.md",
+      "destination_path": "percolation_without_trapping/UPSTREAM_README.md",
+      "git_blob_sha1": "9646fe0d78ebd08fe87047e676b00ca3a77f00d4",
+      "sha256": "14b794026bc7983f76a196f72fc2d4766292d07cc7963837461629a4e7654dd0"
+    }
+  ],
+  "excluded_files": [
+    {
+      "upstream_path": "__pycache__/__init__.cpython-310.pyc",
+      "reason": "Generated Python bytecode, not source."
+    },
+    {
+      "upstream_path": "__pycache__/main.cpython-310.pyc",
+      "reason": "Generated Python bytecode, not source."
+    },
+    {
+      "upstream_path": "__pycache__/twoPhaseD.cpython-310.pyc",
+      "reason": "Generated Python bytecode, not source."
+    },
+    {
+      "upstream_path": "__pycache__/twoPhaseImb.cpython-310.pyc",
+      "reason": "Generated Python bytecode, not source."
+    }
+  ],
+  "dependency_inspection": {
+    "repository": "https://github.com/ImperialCollegeLondon/pnflowPy",
+    "commit": "f90dd008d14688665d11633e27a9dc6eedf4357f",
+    "purpose": "Static source and environment inspection only; not a validated compatibility pin.",
+    "environment_file": "environment.yml",
+    "license_file": "LICENSE"
+  },
+  "associated_papers": [
+    {
+      "year": 2024,
+      "doi": "10.1103/PhysRevE.110.035105",
+      "title": "Percolation without trapping: How Ostwald ripening during two-phase displacement in porous media alters capillary pressure and relative permeability",
+      "code_reference_number": 40,
+      "code_reference_url": "https://github.com/ImperialCollegeLondon/OstRipening"
+    },
+    {
+      "year": 2026,
+      "doi": "10.1103/kbb7-wbln",
+      "title": "Time-dependent pore-network modeling of Ostwald ripening in porous media",
+      "code_reference_number": 34,
+      "code_reference_url": "https://github.com/ImperialCollegeLondon/porescale"
+    }
+  ],
+  "license_statement": {
+    "upstream_readme": "Distributed under the MIT License.",
+    "standalone_license_file_present_in_upstream": false,
+    "note": "Preserve the upstream declaration without inventing a license text or copyright notice. The separate pnflowPy dependency has its own license."
+  },
+  "validation_scope": {
+    "unchanged_source_hashes_checked": true,
+    "existing_solver_files_unchanged": true,
+    "dependency_environment_created": false,
+    "model_imported": false,
+    "simulation_executed": false,
+    "paper_reproduced": false,
+    "paper_reproduction_input_provided": false,
+    "paper_reproduction_input_in_upstream": false
+  }
+}
